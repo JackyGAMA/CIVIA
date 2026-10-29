@@ -44,3 +44,4 @@ features_demograficas.parquet
 dataset_territorial.parquet
 modelo_abstencion_xgb.json
 modelo_abstencion_catboost*.cbm
+
