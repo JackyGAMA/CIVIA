@@ -1,0 +1,2495 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INE | Sistema de Inteligencia Predictiva de Abstención Electoral</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ine: { wine: '#6A1B31', dark: '#4A1020', light: '#FAF2F5', border: '#E8D5DC' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-feature-settings:"cv02","cv03","cv04","cv11"; }
+        .risk-ALTO  { background:#FDF2F2; color:#991B1B; border:1px solid #FCA5A5; }
+        .risk-MEDIO { background:#FFFBEB; color:#92400E; border:1px solid #FDE68A; }
+        .risk-BAJO  { background:#F0FDF4; color:#166534; border:1px solid #BBF7D0; }
+        #map { height:520px; }
+        .leaflet-container { font-family:inherit; background:#F3F4F6; }
+        .pred-active { box-shadow: 0 0 0 3px rgba(106,27,49,.25); }
+        
+        /* Web App Microinteractions & Smooth Transitions */
+        .kpi-card {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.08);
+        }
+        .tab-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .interactive-row {
+            transition: background-color 0.15s ease, transform 0.1s ease;
+        }
+        .interactive-row:hover {
+            background-color: #F8FAFC;
+        }
+        .pulse-update {
+            animation: pulseHighlight 0.6s ease-out;
+        }
+        @keyframes pulseHighlight {
+            0% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.03); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Scenario card interactivity */
+        .scenario-card {
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        .scenario-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.10);
+        }
+        .scenario-card.scenario-active {
+            box-shadow: 0 0 0 3px rgba(106, 27, 49, 0.3), 0 4px 16px -2px rgba(0, 0, 0, 0.12);
+            transform: translateY(-2px);
+        }
+        .scenario-card::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            left: 50%;
+            transform: translateX(-50%) scaleX(0);
+            width: 32px;
+            height: 3px;
+            border-radius: 2px;
+            background: #6A1B31;
+            transition: transform 0.25s ease;
+        }
+        .scenario-card.scenario-active::after {
+            transform: translateX(-50%) scaleX(1);
+        }
+        .map-fade-transition {
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-[#F8F9FA] text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+
+<!-- TOP BAR -->
+<div class="h-1 bg-gradient-to-r from-ine-wine via-[#8C2243] to-ine-wine"></div>
+
+<!-- HEADER -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+
+        <!-- Brand -->
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-ine-wine flex items-center justify-center text-white font-black text-lg tracking-wider shadow-xs">INE</div>
+            <div>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-ine-wine bg-ine-light border border-ine-border px-2 py-0.5 rounded">
+                    Instituto Nacional Electoral
+                </span>
+                <h1 class="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                    Sistema de Inteligencia Predictiva de Abstención Electoral
+                </h1>
+            </div>
+        </div>
+
+        <!-- MODE SWITCHER -->
+        <div class="flex items-center gap-2 p-1 bg-slate-100 border border-slate-300 rounded-xl shadow-inner">
+            <button id="btn-mode-historico"
+                onclick="setMode('historico')"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-white text-slate-800 shadow-xs border border-slate-200 transition">
+                <span>[H]</span> Modo Exploración Histórica
+            </button>
+            <button id="btn-mode-prediccion"
+                onclick="setMode('prediccion')"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-800 transition">
+                <span>[P]</span> Modo Predicción / Proyección Futura
+            </button>
+        </div>
+
+        <!-- Active year badge -->
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-lg">
+            <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
+            <span>Año Activo: <strong id="lbl-anio-activo">2024</strong></span>
+        </div>
+
+    </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-6 space-y-6 flex-1 w-full">
+
+    <!-- BANNER CONTEXTUAL HISTORICO -->
+    <div id="banner-historico" class="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-1 flex-1 min-w-[260px]">
+            <div class="flex items-center gap-2">
+                <span class="text-[11px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono font-bold uppercase tracking-wider">Modo: Exploración Histórica</span>
+                <span id="badge-tipo-dato" class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                    BASE DEL MODELO
+                </span>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed">
+                Consulta los datos de predicción calculados por los modelos <strong>XGBoost / CatBoost</strong> sobre
+                las <strong>70,751 secciones electorales</strong> del padrón 2024. Estos valores representan la
+                <strong>probabilidad de abstención estimada</strong> para cada sección a partir del historial electoral
+                2009-2021 y variables sociodemográficas.
+                <span class="text-ine-wine font-semibold">No son resultados observados - son predicciones del modelo.</span>
+            </p>
+        </div>
+        <div class="shrink-0">
+            <label class="block text-[11px] font-bold text-slate-600 mb-1 uppercase tracking-wider">Ciclo electoral de consulta</label>
+            <select id="sel-anio-hist" onchange="onAnioHistChange()" class="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-ine-wine focus:outline-none shadow-xs">
+                <option value="2024" selected>2024 - Base calibrada del modelo ML</option>
+                <option value="2021">2021 - Histórico observado INE (Intermedia)</option>
+                <option value="2018">2018 - Histórico observado INE (Presidencial)</option>
+                <option value="2015">2015 - Histórico observado INE (Intermedia)</option>
+                <option value="2012">2012 - Histórico observado INE (Presidencial)</option>
+                <option value="2009">2009 - Histórico observado INE (Intermedia)</option>
+            </select>
+            <p id="hist-anio-note" class="text-[11px] text-slate-500 mt-1">
+                Las predicciones del modelo están calibradas sobre 2024.
+            </p>
+        </div>
+    </div>
+
+    <!-- BANNER HERO PREDICCION FUTURA -->
+    <div id="banner-prediccion" class="hidden bg-ine-wine text-white rounded-2xl p-6 shadow-lg pred-active space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <div class="text-xs font-bold uppercase tracking-wider text-rose-300 mb-1">
+                    Modo Predicción / Proyección Electoral
+                </div>
+                <h2 class="text-2xl font-black tracking-tight">Generador de Proyecciones para Elecciones Futuras</h2>
+                <p class="text-sm text-rose-100 mt-1 max-w-2xl leading-relaxed">
+                    Este módulo aplica los modelos <strong>ML (XGBoost / CatBoost)</strong> calibrados sobre el ciclo 2024
+                    para estimar el riesgo de abstención en procesos electorales futuros.
+                    Los valores mostrados <strong>son proyecciones estadísticas, no datos observados</strong>.
+                </p>
+            </div>
+            <div class="bg-white/15 border border-white/20 rounded-xl p-4 min-w-[240px]">
+                <label class="text-xs font-bold uppercase tracking-wider text-rose-200 block mb-1.5">
+                    Elección objetivo de proyección
+                </label>
+                <select id="sel-anio-pred" onchange="onAnioPredChange()" class="w-full bg-white/10 border border-white/30 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-white/50">
+                    <option value="2027">2027 - Intermedia Federal (próxima)</option>
+                    <option value="2030">2030 - Presidencial Federal</option>
+                </select>
+                <p class="text-[11px] text-rose-200 mt-1.5" id="pred-tipo-nota">
+                    Elecciones intermedias: históricamente ~4% más de abstención que presidenciales.
+                </p>
+            </div>
+        </div>
+        <div class="border-t border-white/20 pt-4 flex flex-wrap items-center gap-3">
+            <button onclick="generateProjection()" id="btn-gen-pred"
+                class="bg-white text-ine-wine font-black text-sm px-6 py-3 rounded-xl shadow-lg hover:bg-rose-50 transition flex items-center gap-2">
+                Generar Proyección Electoral
+            </button>
+            <div class="text-xs text-rose-200 max-w-md leading-relaxed">
+                Aplica el factor de ajuste prospectivo por tipo de proceso electoral y reclasifica el riesgo de las 70,751 secciones. El mapa superior se actualiza de inmediato.
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- MICRO-SECCIÓN METODOLÓGICA: EXPLICACIÓN DEL MODELO PREDICTIVO             -->
+    <!-- ========================================================================= -->
+    <section class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex items-start gap-3">
+        <div class="w-8 h-8 rounded-lg bg-ine-light border border-ine-border text-ine-wine font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
+            [ML]
+        </div>
+        <div class="space-y-0.5 flex-1 text-xs">
+            <div class="flex items-center gap-2">
+                <h3 class="font-bold text-slate-900 tracking-tight">¿Cómo genera la predicción?</h3>
+                <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">Explicación del modelo</span>
+            </div>
+            <p class="text-slate-600 leading-snug">
+                El sistema analiza el historial electoral y variables territoriales para estimar el riesgo de abstención futura.
+                <span class="text-ine-wine font-semibold">La salida es una proyección estadística, no un dato observado.</span>
+            </p>
+        </div>
+    </section>
+
+    <!-- TARJETAS DE RESUMEN / KPIS (DINÁMICAS SEGÚN MODO) -->
+    <section>
+        <div class="flex items-center justify-between mb-2">
+            <h2 id="kpi-header-title" class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Métricas Nacionales del Proceso <span id="kpi-anio-label">2024</span>
+            </h2>
+            <span id="kpis-context-label" class="text-xs text-slate-500">70,751 secciones · 32 entidades · 2,477 municipios</span>
+        </div>
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div onclick="selectRiskCube('TODOS')" title="Ver todas las secciones del padrón" class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs kpi-card cursor-pointer hover:border-slate-400">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                    <span>Secciones</span>
+                    <span class="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">[Clic]</span>
+                </div>
+                <div id="kpi-total" class="text-2xl font-extrabold text-slate-900 mt-1 font-mono">70,751</div>
+                <div id="kpi-sub-total" class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-100">Padrón nacional</div>
+            </div>
+            <div onclick="selectRiskCube('PROMEDIO')" title="Ver detalle del promedio nacional de abstención" class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs kpi-card cursor-pointer hover:border-ine-border">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                    <span id="kpi-lbl-prom">Abstención media</span>
+                    <span class="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">[Clic]</span>
+                </div>
+                <div id="kpi-promedio" class="text-2xl font-extrabold text-ine-wine mt-1 font-mono">46.77%</div>
+                <div id="kpi-sub-prom" class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-100">Predicción nacional</div>
+            </div>
+            <div onclick="selectRiskCube('ALTO')" title="Filtrar por Alto Riesgo y ver recomendaciones preventivas" class="bg-white p-4 rounded-xl border border-red-200 shadow-xs kpi-card cursor-pointer hover:border-red-400 hover:ring-2 hover:ring-red-100">
+                <div class="text-[11px] font-bold text-red-800 uppercase tracking-wider flex items-center justify-between">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-700"></span>Alto riesgo</span>
+                    <span class="text-[9px] font-mono text-red-600 bg-red-50 border border-red-200 px-1 rounded font-bold">[Filtrar]</span>
+                </div>
+                <div id="kpi-alto" class="text-2xl font-extrabold text-red-800 mt-1 font-mono">23,584</div>
+                <div id="kpi-sub-alto" class="text-[11px] text-red-600 mt-1.5 pt-1.5 border-t border-red-100">&gt;50.99% - 33.3%</div>
+            </div>
+            <div onclick="selectRiskCube('MEDIO')" title="Filtrar por Riesgo Medio y ver recomendaciones preventivas" class="bg-white p-4 rounded-xl border border-amber-200 shadow-xs kpi-card cursor-pointer hover:border-amber-400 hover:ring-2 hover:ring-amber-100">
+                <div class="text-[11px] font-bold text-amber-800 uppercase tracking-wider flex items-center justify-between">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-600"></span>Riesgo medio</span>
+                    <span class="text-[9px] font-mono text-amber-600 bg-amber-50 border border-amber-200 px-1 rounded font-bold">[Filtrar]</span>
+                </div>
+                <div id="kpi-medio" class="text-2xl font-extrabold text-amber-800 mt-1 font-mono">23,583</div>
+                <div id="kpi-sub-medio" class="text-[11px] text-amber-600 mt-1.5 pt-1.5 border-t border-amber-100">42-51% - 33.3%</div>
+            </div>
+            <div onclick="selectRiskCube('BAJO')" title="Filtrar por Bajo Riesgo y ver recomendaciones preventivas" class="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs kpi-card cursor-pointer hover:border-emerald-400 hover:ring-2 hover:ring-emerald-100">
+                <div class="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center justify-between">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-700"></span>Bajo riesgo</span>
+                    <span class="text-[9px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-1 rounded font-bold">[Filtrar]</span>
+                </div>
+                <div id="kpi-bajo" class="text-2xl font-extrabold text-emerald-800 mt-1 font-mono">23,584</div>
+                <div id="kpi-sub-bajo" class="text-[11px] text-emerald-600 mt-1.5 pt-1.5 border-t border-emerald-100">&lt;42.31% - 33.3%</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- COMPONENTE PERSISTENTE: MAPA TERRITORIAL DE PREDICCIÓN / PROYECCIÓN      -->
+    <!-- ========================================================================= -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+                <div class="flex items-center gap-2">
+                    <h2 class="text-sm font-bold text-slate-900">
+                        Capa Territorial de Abstención Electoral - 32 Entidades Federativas
+                    </h2>
+                    <span id="map-mode-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                        HISTÓRICO 2024
+                    </span>
+                </div>
+                <p id="map-sub-desc" class="text-xs text-slate-600 mt-1 max-w-3xl leading-relaxed">
+                    <strong>Capa superpuesta territorial:</strong> Los polígonos representan el nivel de riesgo y la tasa promedio de abstención estimada a partir del historial electoral y el modelo predictivo.
+                    <strong>Haz clic en cualquier estado</strong> para seleccionarlo, ver su ficha de detalle, actualizar las métricas y focalizar la tabla de secciones.
+                </p>
+            </div>
+            <div class="flex items-center gap-3">
+                <!-- Toggle polygons / bubbles -->
+                <div class="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+                    <button id="btn-view-poly" onclick="setMapViewMode('polygons')" class="px-2.5 py-1 rounded-md bg-white text-slate-800 shadow-xs transition">
+                        Polígonos
+                    </button>
+                    <button id="btn-view-bubbles" onclick="setMapViewMode('bubbles')" class="px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 transition">
+                        Burbujas
+                    </button>
+                </div>
+
+                <!-- Coverage info badge -->
+                <div class="flex flex-col items-end text-[11px]">
+                    <span class="bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> Cobertura: 32 / 32 Estados
+                    </span>
+                    <span class="text-slate-400 mt-0.5 text-[10px]">Polígonos seccionales: conectables</span>
+                </div>
+                <label class="text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 transition">
+                    <span>[+]</span> Conectar GeoJSON Seccional INE
+                    <input type="file" id="geojson-input" accept=".geojson,.json" onchange="handleGeoJsonUpload(event)" class="hidden">
+                </label>
+            </div>
+        </div>
+
+        <!-- Explanatory Banner about ML Prediction & Territory -->
+        <div id="map-expl-banner" class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <span class="font-bold text-slate-800">Objetivo del Modelo Territorial:</span>
+                Anticipar oportunamente los territorios con mayor propensión a la abstención para focalizar brigadas de promoción del voto, instalación de casillas extraordinarias y estrategias de participación ciudadana.
+            </div>
+            <span class="text-[11px] bg-white border border-slate-200 px-2.5 py-1 rounded font-mono text-slate-500">
+                q33: 42.31% · q66: 50.99%
+            </span>
+        </div>
+
+        <!-- Map Filter Active Banner -->
+        <div id="map-filter-banner" class="hidden bg-ine-light border border-ine-border px-4 py-2 rounded-lg flex items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2 text-ine-wine font-semibold">
+                <span>[Filtro activo]</span>
+                <span>Territorio seleccionado: <strong id="map-filter-label" class="text-slate-900">...</strong></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="viewStateDetail()" class="bg-ine-wine text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-ine-dark transition">
+                    Ver Ficha Estatal
+                </button>
+                <button onclick="clearMapFilter()" class="bg-white hover:bg-slate-100 border border-ine-border text-ine-wine px-2.5 py-1 rounded text-xs font-bold transition">
+                    Ver toda la República
+                </button>
+            </div>
+        </div>
+
+        <!-- Leaflet Map Container -->
+        <div class="rounded-lg overflow-hidden border border-slate-200 relative">
+            <div id="map"></div>
+
+            <!-- Legend Overlay -->
+            <div class="absolute bottom-3 right-3 z-[999] bg-white/95 backdrop-blur-xs border border-slate-200 rounded-lg p-3 shadow-md text-xs space-y-1.5 pointer-events-auto min-w-[210px]">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-1 flex items-center justify-between gap-3">
+                    <span id="legend-title">Simbología de Riesgo</span>
+                    <span id="legend-mode-tag" class="text-[9px] bg-slate-100 px-1.5 py-0.2 rounded text-slate-500 font-bold">2024 Base</span>
+                </div>
+                <div id="legend-escenario-sub" class="hidden text-[10px] text-ine-wine font-semibold bg-ine-light/70 px-1.5 py-0.5 rounded border border-ine-border/60">
+                    Escenario Activo: Sin intervención
+                </div>
+                <div id="legend-items-container" class="space-y-1.5">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3.5 h-3.5 rounded bg-[#991B1B] border border-red-900 inline-block opacity-85"></span>
+                        <span class="text-slate-800 font-medium">ALTO RIESGO (&gt; 50.99%)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-3.5 h-3.5 rounded bg-[#B45309] border border-amber-900 inline-block opacity-85"></span>
+                        <span class="text-slate-800 font-medium">RIESGO MEDIO (42.31% - 50.99%)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-3.5 h-3.5 rounded bg-[#166534] border border-emerald-900 inline-block opacity-85"></span>
+                        <span class="text-slate-800 font-medium">BAJO RIESGO (&lt; 42.31%)</span>
+                    </div>
+                </div>
+                <div class="border-t border-slate-100 pt-1 text-[10px] text-slate-500 flex items-center justify-between">
+                    <span>Transparencia: 55%</span>
+                    <span>Base: OSM libre</span>
+                </div>
+            </div>
+
+            <!-- Hover Information Box -->
+            <div id="map-hover-box" class="absolute top-3 left-3 z-[999] bg-white/95 backdrop-blur-xs border border-slate-200 rounded-lg px-3 py-2 shadow-md text-xs pointer-events-none hidden max-w-xs">
+                <div id="hover-state-name" class="font-bold text-slate-900 text-sm">Estado</div>
+                <div id="hover-state-abst" class="text-ine-wine font-extrabold text-base mt-0.5">- % abstención</div>
+                <div id="hover-state-risk" class="text-[10px] font-bold mt-1">-</div>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between text-[11px] text-slate-500 italic">
+            <span>Capa base: OpenStreetMap libre de API key · Superposición vectorial: Polígonos de 32 entidades INE enriquecidos con métricas del modelo.</span>
+            <span class="not-italic text-slate-600 font-semibold">Haz clic sobre cualquier estado en el mapa para seleccionarlo</span>
+        </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- SECCIÓN DE DETALLE / TABLA: MODO HISTÓRICO                                -->
+    <!-- ========================================================================= -->
+    <div id="content-historico" class="space-y-6">
+        <!-- Filtros de Consulta Seccional -->
+        <section class="space-y-3">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                <div class="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-2">
+                    <h2 class="text-sm font-bold text-slate-900">
+                        Filtros de Consulta Seccional
+                    </h2>
+                    <button onclick="resetFilters()" class="text-xs text-ine-wine font-semibold hover:underline">Restablecer filtros</button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">1. Entidad Federativa</label>
+                        <select id="select-estado" onchange="onEstadoChange()" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-ine-wine focus:outline-none">
+                            <option value="">- Toda la República (32 Entidades) -</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">2. Municipio / Alcaldía</label>
+                        <select id="select-municipio" onchange="onMunicipioChange()" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-ine-wine focus:outline-none" disabled>
+                            <option value="">- Selecciona Estado primero -</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">3. Nivel de Riesgo</label>
+                        <select id="select-riesgo" onchange="onFilterChange()" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-ine-wine focus:outline-none">
+                            <option value="">- Todos los niveles -</option>
+                            <option value="ALTO">Alto Riesgo (&gt;50.99%)</option>
+                            <option value="MEDIO">Riesgo Medio (42.31%-50.99%)</option>
+                            <option value="BAJO">Bajo Riesgo (&lt;42.31%)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">4. Buscar Sección / ID</label>
+                        <div class="relative">
+                            <input type="text" id="input-search" oninput="debounceSearch()" placeholder="Ej. 150, 10010001..." class="w-full bg-slate-50 border border-slate-300 rounded-lg pl-3 pr-8 py-2 text-xs focus:ring-2 focus:ring-ine-wine focus:outline-none">
+                            <span class="absolute right-2.5 top-2.5 text-slate-400 text-xs pointer-events-none">[Q]</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de secciones -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-sm font-bold text-slate-900">Padrón Seccional - Predicciones por Sección</h3>
+                        <span id="table-count-label" class="text-xs bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-mono font-semibold">...</span>
+                    </div>
+                    <button onclick="exportCurrentViewCSV()" class="text-xs bg-white hover:bg-slate-50 border border-slate-300 px-3 py-1.5 rounded-lg text-slate-700 font-semibold flex items-center gap-1.5 shadow-xs transition">
+                        Exportar CSV
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                                <th class="py-3 px-4">ID Territorio</th>
+                                <th class="py-3 px-4">Estado</th>
+                                <th class="py-3 px-4">Municipio</th>
+                                <th class="py-3 px-3 text-center">Sección</th>
+                                <th class="py-3 px-3 text-center">Tipo</th>
+                                <th class="py-3 px-4">Abstención Predicha</th>
+                                <th class="py-3 px-4 text-center">Riesgo</th>
+                                <th class="py-3 px-4 text-center">Detalle</th>
+                            </tr>
+                        </thead>
+                        <tbody id="secciones-tbody" class="divide-y divide-slate-100 text-slate-700">
+                            <tr><td colspan="8" class="text-center py-10 text-slate-400">Cargando datos...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
+                    <div id="pagination-info">Mostrando 0 - 0 de 0</div>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-prev" onclick="prevPage()" class="px-3 py-1.5 bg-white border border-slate-300 rounded font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">&larr; Anterior</button>
+                        <span class="font-mono font-bold text-slate-800">Pág. <span id="page-num">1</span></span>
+                        <button id="btn-next" onclick="nextPage()" class="px-3 py-1.5 bg-white border border-slate-300 rounded font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">Siguiente &rarr;</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Resúmenes territoriales -->
+        <section class="space-y-3">
+            <div class="border-b border-slate-200 pb-2 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <h2 class="text-sm font-bold text-slate-900">Resúmenes Territoriales Agregados</h2>
+                    <div class="flex border-b border-transparent text-xs font-medium">
+                        <button id="btn-tab-edo" onclick="switchResumen('estados')" class="px-4 py-2 font-bold border-b-2 border-ine-wine text-ine-wine">
+                            Por Entidad (32)
+                        </button>
+                        <button id="btn-tab-mpio" onclick="switchResumen('municipios')" class="px-4 py-2 font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800">
+                            Por Municipio (2,477)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Estados -->
+            <div id="tab-estados" class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                                <th class="py-2.5 px-3">Cve</th>
+                                <th class="py-2.5 px-4">Entidad Federativa</th>
+                                <th class="py-2.5 px-4 text-right">Abstención Media</th>
+                                <th class="py-2.5 px-4 text-right">Total Secciones</th>
+                                <th class="py-2.5 px-4 text-right text-red-800">Alto Riesgo</th>
+                                <th class="py-2.5 px-4 text-right text-amber-800">Riesgo Medio</th>
+                                <th class="py-2.5 px-4 text-right text-emerald-800">Bajo Riesgo</th>
+                                <th class="py-2.5 px-4 text-right">% Alto Riesgo</th>
+                                <th class="py-2.5 px-3 text-center">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-estados" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab Municipios -->
+            <div id="tab-municipios" class="hidden bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
+                    <span class="text-slate-600">Filtrar municipios por estado:</span>
+                    <select id="sel-resumen-estado" onchange="loadMunicipiosSummary()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs">
+                        <option value="">- Todos los Estados (primeros 150) -</option>
+                    </select>
+                </div>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="sticky top-0 bg-slate-100 z-10">
+                            <tr class="border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                                <th class="py-2.5 px-3">Entidad</th>
+                                <th class="py-2.5 px-4">Municipio</th>
+                                <th class="py-2.5 px-4 text-right">Abstención Media</th>
+                                <th class="py-2.5 px-4 text-right">Total Secciones</th>
+                                <th class="py-2.5 px-4 text-right text-red-800">Alto</th>
+                                <th class="py-2.5 px-4 text-right text-amber-800">Medio</th>
+                                <th class="py-2.5 px-4 text-right text-emerald-800">Bajo</th>
+                                <th class="py-2.5 px-4 text-right">% Alto</th>
+                                <th class="py-2.5 px-3 text-center">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-municipios" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SECCIÓN DE DETALLE / TABLA: MODO PREDICCIÓN / PROYECCIÓN FUTURA           -->
+    <!-- ========================================================================= -->
+    <div id="content-prediccion" class="hidden space-y-6">
+
+        <!-- Filtros para predicción -->
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h3 class="text-sm font-bold text-slate-900">Filtros de Focalización para la Proyección</h3>
+                <button onclick="resetPredFilters()" class="text-xs text-ine-wine font-semibold hover:underline">Limpiar</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Entidad Federativa</label>
+                    <select id="sel-pred-estado" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-ine-wine focus:outline-none">
+                        <option value="">- Toda la República -</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Nivel de Riesgo Proyectado</label>
+                    <select id="sel-pred-riesgo" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-ine-wine focus:outline-none">
+                        <option value="">- Todos los niveles -</option>
+                        <option value="ALTO">Alto Riesgo Proyectado</option>
+                        <option value="MEDIO">Riesgo Medio Proyectado</option>
+                        <option value="BAJO">Bajo Riesgo Proyectado</option>
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button onclick="generateProjection()" class="w-full bg-ine-wine hover:bg-ine-dark text-white text-xs font-bold px-4 py-2 rounded-lg shadow-xs transition flex items-center justify-center gap-2">
+                        Ver proyección filtrada
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resultados de la Proyección -->
+        <div id="pred-results" class="space-y-5">
+            <!-- Prediction Delta Summary Card -->
+            <div class="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-xs font-bold uppercase tracking-wider text-amber-900">
+                        PROYECCIÓN ESTADÍSTICA - <span id="pred-anio-label">2027</span>
+                    </div>
+                    <span class="text-[11px] bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-full font-bold">
+                        Dato Proyectado - No Observado
+                    </span>
+                </div>
+                <div class="text-xs text-amber-800" id="pred-meta-nota">
+                    Basada en predicciones ML 2024 con ajuste por tipo de proceso electoral.
+                </div>
+                <div class="text-xs text-amber-900 pt-1 border-t border-amber-200">
+                    Abstención base 2024: <strong id="pred-base-2024">46.77%</strong> &rarr;
+                    Proyección <span id="pred-anio-label2">2027</span>: <strong id="pred-prom-proy" class="text-ine-wine">48.73%</strong>
+                    (Diferencial: <strong id="pred-delta" class="text-red-700">+1.96%</strong> por factor de ajuste)
+                </div>
+            </div>
+
+            <!-- ========================================================================= -->
+            <!-- MÓDULO DE ESCENARIOS DE RIESGO: BASE VS INTERVENCIÓN PREVENTIVA          -->
+            <!-- ========================================================================= -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold text-slate-900">Análisis Comparativo de Escenarios de Riesgo</h3>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase">Planeación Electoral</span>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            Compara la trayectoria inercial del modelo frente a una simulación preventiva con intervención territorial institucional.
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[11px] text-slate-400">Microexplicación metodológica:</span>
+                        <div class="text-[11px] font-semibold text-slate-700">El escenario base representa la predicción del modelo · El escenario con intervención simula una reducción preventiva del riesgo.</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <!-- Escenario A: Sin intervención -->
+                    <div id="card-escenario-base" onclick="selectScenario('base')" class="scenario-card scenario-active p-3.5 rounded-xl border-2 border-slate-400 bg-slate-50 space-y-2 shadow-xs transition-all">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-300 px-2 py-0.5 rounded">
+                                Escenario A
+                            </span>
+                            <span id="badge-scen-base" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-white">
+                                Activo en mapa
+                            </span>
+                        </div>
+                        <h4 class="text-xs font-bold text-slate-800">Sin Intervención (Base)</h4>
+                        <p class="text-[11px] text-slate-600 leading-snug">
+                            Proyección normal del modelo ML sin refuerzo territorial extraordinario.
+                        </p>
+                        <div class="pt-2 border-t border-slate-200 flex items-baseline justify-between">
+                            <span class="text-[11px] text-slate-500">Abstención Media:</span>
+                            <span id="scen-base-prom" class="text-lg font-black text-slate-900 font-mono">48.73%</span>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-red-800 font-medium">
+                            <span>Secciones Alto Riesgo:</span>
+                            <span id="scen-base-alto" class="font-bold font-mono">28,410</span>
+                        </div>
+                    </div>
+
+                    <!-- Escenario B: Con intervención -->
+                    <div id="card-escenario-interv" onclick="selectScenario('intervencion')" class="scenario-card p-3.5 rounded-xl border-2 border-emerald-300 bg-emerald-50/50 space-y-2 shadow-xs opacity-90 transition-all">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-900 bg-emerald-200 px-2 py-0.5 rounded">
+                                Escenario B
+                            </span>
+                            <span id="badge-scen-interv" class="text-[10px] font-medium text-emerald-700">
+                                Clic para ver en mapa
+                            </span>
+                        </div>
+                        <h4 class="text-xs font-bold text-emerald-950">Con Intervención Institucional</h4>
+                        <p class="text-[11px] text-emerald-800 leading-snug">
+                            Simula mitigación focalizada con brigadas INE, difusión adaptada y casillas extraordinarias.
+                        </p>
+                        <div class="pt-2 border-t border-emerald-200 flex items-baseline justify-between">
+                            <span class="text-[11px] text-emerald-700">Abstención Simulada:</span>
+                            <span id="scen-interv-prom" class="text-lg font-black text-emerald-900 font-mono">46.24%</span>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-emerald-800 font-medium">
+                            <span>Secciones Alto Riesgo:</span>
+                            <span id="scen-interv-alto" class="font-bold font-mono">18,231</span>
+                        </div>
+                    </div>
+
+                    <!-- Impacto / Diferencia -->
+                    <div id="card-escenario-impacto" onclick="selectScenario('impacto')" class="scenario-card p-3.5 rounded-xl border-2 border-ine-border bg-ine-light/40 space-y-2 opacity-90 transition-all">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-ine-wine bg-white border border-ine-border px-2 py-0.5 rounded">
+                                Impacto Estimado
+                            </span>
+                            <span id="badge-scen-impacto" class="text-[10px] font-medium text-ine-wine">
+                                Clic para ver en mapa
+                            </span>
+                        </div>
+                        <h4 class="text-xs font-bold text-slate-900">Diferencial Preventivo</h4>
+                        <p class="text-[11px] text-slate-600 leading-snug">
+                            Reducción simulada de abstención y traspaso de secciones hacia menor riesgo.
+                        </p>
+                        <div class="pt-2 border-t border-ine-border flex items-baseline justify-between">
+                            <span class="text-[11px] text-slate-600">Mejora Abstención:</span>
+                            <span id="scen-diff-prom" class="text-lg font-black text-emerald-700 font-mono">-2.49%</span>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-slate-700 font-medium">
+                            <span>Secciones Mitigadas:</span>
+                            <span id="scen-mitigadas" class="font-bold text-emerald-800 font-mono">10,179 sec.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Secciones Proyectadas con Comparación de Escenarios -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-200 bg-amber-50/40 flex items-center justify-between text-xs">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-900">Secciones Proyectadas y Comparativa de Escenarios (<span id="pred-tabla-titulo">2027</span>)</span>
+                        <span class="bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold text-[10px]">PROYECCIÓN</span>
+                    </div>
+                    <span class="text-slate-500">Haz clic en "Ficha" para ver el perfil demográfico etario y recomendaciones.</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                                <th class="py-2.5 px-4">ID Territorio</th>
+                                <th class="py-2.5 px-4">Estado</th>
+                                <th class="py-2.5 px-3 text-center">Secc.</th>
+                                <th id="th-col-base" class="py-2.5 px-4 bg-slate-200/80 text-slate-900 border-x border-slate-300">Abst. Base (Esc. A)</th>
+                                <th id="th-col-interv" class="py-2.5 px-4">Abst. Con Interv. (Esc. B)</th>
+                                <th id="th-col-diff" class="py-2.5 px-4 text-center">Diferencia</th>
+                                <th id="th-col-rbase" class="py-2.5 px-4 text-center bg-slate-200/50">Riesgo Esc. A</th>
+                                <th id="th-col-rinterv" class="py-2.5 px-4 text-center">Riesgo Esc. B</th>
+                                <th class="py-2.5 px-3 text-center">Ficha</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pred-tbody" class="divide-y divide-slate-100 text-slate-700">
+                            <tr><td colspan="9" class="text-center py-8 text-slate-400">Generando proyección...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Nota metodológica -->
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs text-slate-600 space-y-1.5">
+                <div class="font-bold text-slate-800">Nota Metodológica de Escenarios y Proyecciones</div>
+                <p id="pred-nota-metodologica">Cargando nota metodológica...</p>
+                <p class="text-slate-500 italic">
+                    Estos valores son estimaciones estadísticas y simulaciones hipotéticas. Para planificación operativa definitiva, deben complementarse con análisis de campo, consultas a consejos distritales y datos actualizados del padrón electoral.
+                </p>
+            </div>
+        </div>
+        </div>
+
+    </div>
+
+</main>
+
+<!-- MODAL DETALLE -->
+<div id="modal-detalle" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col">
+        <div class="bg-ine-wine p-4 text-white flex items-center justify-between shrink-0">
+            <div>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-rose-200">Ficha Seccional INE · Inteligencia Territorial</span>
+                <h3 id="modal-title" class="text-lg font-bold leading-tight">Sección...</h3>
+            </div>
+            <button onclick="closeModal()" class="text-rose-200 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+        <div class="p-5 space-y-4 overflow-y-auto">
+            <!-- Clasificación de Riesgo -->
+            <div id="modal-risk-banner" class="p-3 rounded-lg text-center border">
+                <span class="text-[11px] uppercase tracking-wider font-bold block">Clasificación de Riesgo</span>
+                <div id="modal-risk" class="text-2xl font-black mt-0.5">-</div>
+                <div id="modal-pct" class="text-sm font-semibold mt-0.5">-% Abstención Predicha</div>
+            </div>
+
+            <!-- Ficha básica -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase block">Entidad</span>
+                    <span id="modal-estado" class="font-bold text-slate-800 mt-0.5 block truncate">-</span>
+                </div>
+                <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase block">Municipio</span>
+                    <span id="modal-municipio" class="font-bold text-slate-800 mt-0.5 block truncate">-</span>
+                </div>
+                <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase block">ID Territorio</span>
+                    <span id="modal-id" class="font-mono font-bold text-slate-800 mt-0.5 block">-</span>
+                </div>
+                <div class="bg-slate-50 p-2.5 rounded border border-slate-200">
+                    <span class="text-slate-400 text-[10px] font-semibold uppercase block">Tipo Sección</span>
+                    <span id="modal-tipo" class="font-bold text-slate-800 mt-0.5 block">-</span>
+                </div>
+            </div>
+
+            <!-- Comparativa nacional -->
+            <div class="space-y-1 text-xs">
+                <div class="flex justify-between text-slate-600 font-medium">
+                    <span>Comparativa vs Promedio Nacional (46.77%)</span>
+                    <span id="modal-diff" class="font-bold">-</span>
+                </div>
+                <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                    <div id="modal-bar" class="h-full bg-ine-wine transition-all duration-300" style="width:50%"></div>
+                </div>
+            </div>
+
+            <!-- NUEVA SECCIÓN: PERFIL DEMOGRÁFICO DE EDAD -->
+            <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-ine-wine"></span>
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-800">Edad y Composición de la Sección</h4>
+                    </div>
+                    <span id="modal-demo-tag" class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                        Perfil Demográfico
+                    </span>
+                </div>
+
+                <div id="modal-demo-content" class="space-y-3 text-xs">
+                    <!-- Métricas de edad -->
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                            <span class="text-[10px] font-semibold text-slate-400 uppercase block">Edad Promedio</span>
+                            <span id="modal-edad-prom" class="text-lg font-black text-slate-900 mt-0.5 block font-mono">-</span>
+                        </div>
+                        <div class="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                            <span class="text-[10px] font-semibold text-slate-400 uppercase block">Grupo Predominante</span>
+                            <span id="modal-grupo-pred" class="text-lg font-black text-ine-wine mt-0.5 block font-mono">-</span>
+                        </div>
+                        <div class="bg-white p-2.5 rounded-lg border border-slate-200 text-center">
+                            <span class="text-[10px] font-semibold text-slate-400 uppercase block">Perfil Poblacional</span>
+                            <span id="modal-perfil-macro" class="text-xs font-bold text-slate-700 mt-1 block uppercase">-</span>
+                        </div>
+                    </div>
+
+                    <!-- Distribución por grupos de edad -->
+                    <div>
+                        <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
+                            <span>Distribución del Padrón por Grupos de Edad</span>
+                            <span class="text-[10px] text-slate-400 font-normal">Padrón seccional</span>
+                        </div>
+                        <div class="grid grid-cols-5 gap-1.5 text-center font-mono text-[11px]">
+                            <div class="bg-white p-1.5 rounded border border-slate-200">
+                                <span class="text-[10px] font-bold text-slate-500 block">18-24</span>
+                                <span id="modal-p18" class="font-extrabold text-slate-800">-</span>
+                            </div>
+                            <div class="bg-white p-1.5 rounded border border-slate-200">
+                                <span class="text-[10px] font-bold text-slate-500 block">25-34</span>
+                                <span id="modal-p25" class="font-extrabold text-slate-800">-</span>
+                            </div>
+                            <div class="bg-white p-1.5 rounded border border-slate-200">
+                                <span class="text-[10px] font-bold text-slate-500 block">35-44</span>
+                                <span id="modal-p35" class="font-extrabold text-slate-800">-</span>
+                            </div>
+                            <div class="bg-white p-1.5 rounded border border-slate-200">
+                                <span class="text-[10px] font-bold text-slate-500 block">45-59</span>
+                                <span id="modal-p45" class="font-extrabold text-slate-800">-</span>
+                            </div>
+                            <div class="bg-white p-1.5 rounded border border-slate-200">
+                                <span class="text-[10px] font-bold text-slate-500 block">60+</span>
+                                <span id="modal-p60" class="font-extrabold text-slate-800">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Barra visual proporcional -->
+                        <div class="w-full h-2 rounded-full overflow-hidden flex mt-2 bg-slate-200">
+                            <div id="bar-p18" class="bg-cyan-500 h-full" style="width: 20%" title="18-24"></div>
+                            <div id="bar-p25" class="bg-blue-500 h-full" style="width: 20%" title="25-34"></div>
+                            <div id="bar-p35" class="bg-indigo-500 h-full" style="width: 20%" title="35-44"></div>
+                            <div id="bar-p45" class="bg-amber-500 h-full" style="width: 20%" title="45-59"></div>
+                            <div id="bar-p60" class="bg-rose-500 h-full" style="width: 20%" title="60+"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+                            <span>Jóvenes (<span id="modal-pct-jovenes">-</span>%)</span>
+                            <span>Adultos (<span id="modal-pct-adultos">-</span>%)</span>
+                            <span>Adultos Mayores (<span id="modal-pct-mayores">-</span>%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="modal-demo-empty" class="hidden text-center py-4 text-xs text-slate-500 italic">
+                    Perfil demográfico no disponible para esta sección.
+                </div>
+            </div>
+
+            <!-- NUEVA SECCIÓN: RECOMENDACIONES SUGERIDAS -->
+            <div class="border border-amber-200 rounded-xl p-4 bg-amber-50/40 space-y-2">
+                <div class="flex items-center gap-2 border-b border-amber-200 pb-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-900">Recomendaciones Sugeridas de Intervención</h4>
+                </div>
+                <div id="modal-recs-container" class="space-y-1.5 text-xs text-slate-700">
+                    <!-- Inyectadas dinámicamente -->
+                </div>
+            </div>
+        </div>
+        <div class="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-end shrink-0">
+            <button onclick="closeModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-md">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL / PANEL DE RECOMENDACIONES PREVENTIVAS POR CUBO DE RIESGO -->
+<div id="modal-cubo-riesgo" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+        <div class="bg-ine-wine p-4 text-white flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2.5">
+                <div id="modal-cubo-icon" class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center font-bold text-xs">[!]</div>
+                <div>
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-rose-200">Panel Preventivo Institucional · Focalización Seccional</span>
+                    <h3 id="modal-cubo-titulo" class="text-base font-bold leading-tight">Segmento Territorial</h3>
+                </div>
+            </div>
+            <button onclick="closeCuboModal()" class="text-rose-200 hover:text-white text-2xl font-bold leading-none">&times;</button>
+        </div>
+        
+        <div class="p-5 space-y-4 text-xs">
+            <!-- Header con métricas del segmento -->
+            <div id="modal-cubo-banner" class="p-3.5 rounded-xl border flex items-center justify-between">
+                <div>
+                    <span id="modal-cubo-subtitulo" class="text-[11px] uppercase tracking-wider font-bold block text-slate-500">Segmento Seleccionado</span>
+                    <div id="modal-cubo-badge-riesgo" class="text-xl font-black mt-0.5">-</div>
+                </div>
+                <div class="text-right">
+                    <span class="text-[10px] text-slate-500 font-semibold uppercase block">Abstención Estimada</span>
+                    <div id="modal-cubo-abstencion" class="text-lg font-black font-mono text-ine-wine mt-0.5">-</div>
+                </div>
+            </div>
+
+            <!-- Explicación breve -->
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
+                <span class="font-bold text-slate-800 text-[11px] uppercase block">Diagnóstico y Justificación</span>
+                <p id="modal-cubo-explicacion" class="text-slate-600 leading-relaxed">
+                    Descripción del segmento...
+                </p>
+            </div>
+
+            <!-- 2-3 Consejos preventivos cortos -->
+            <div class="border border-amber-200 rounded-xl p-3.5 bg-amber-50/50 space-y-2">
+                <div class="flex items-center gap-2 border-b border-amber-200/80 pb-1.5">
+                    <span class="w-2 h-2 rounded-full bg-amber-600"></span>
+                    <h4 class="font-bold text-slate-900 text-xs uppercase tracking-wider">Consejos Preventivos y Líneas de Acción</h4>
+                </div>
+                <div id="modal-cubo-consejos" class="space-y-1.5 text-slate-700">
+                    <!-- Inyectados dinámicamente -->
+                </div>
+            </div>
+
+            <!-- Notificación de sincronización -->
+            <div class="flex items-center justify-between text-[11px] text-slate-500 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg text-emerald-900">
+                <span>El mapa y la tabla se han actualizado automáticamente con este filtro.</span>
+                <span class="font-bold font-mono text-emerald-800">[Activo]</span>
+            </div>
+        </div>
+
+        <div class="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-between shrink-0">
+            <button onclick="resetFilters(); closeCuboModal();" class="text-xs text-slate-600 hover:text-slate-900 underline font-semibold">
+                Ver todos los registros
+            </button>
+            <button onclick="closeCuboModal()" class="px-4 py-1.5 bg-ine-wine hover:bg-ine-dark text-white text-xs font-semibold rounded-md shadow-xs">
+                Entendido, explorar mapa y tabla
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- FOOTER -->
+<footer class="bg-white border-t border-slate-200 py-4 mt-4 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-wrap items-center justify-between gap-2">
+        <span>Instituto Nacional Electoral | Sistema de Inteligencia Predictiva de Abstención Electoral</span>
+        <span class="font-mono text-[11px] text-slate-400">Versión 1.4</span>
+    </div>
+</footer>
+
+<!-- JAVASCRIPT -->
+<script>
+// State Centroids
+const COORDS = {
+    1:[21.8853,-102.2916], 2:[30.8406,-115.2838], 3:[26.0444,-111.6661],
+    4:[19.8301,-90.5349],  5:[27.0587,-101.7068], 6:[19.2452,-103.7241],
+    7:[16.7569,-93.1292],  8:[28.6330,-106.0691], 9:[19.4326,-99.1332],
+    10:[24.0277,-104.6532],11:[21.0190,-101.2574],12:[17.5516,-99.5006],
+    13:[20.0911,-98.7624], 14:[20.6597,-103.3496],15:[19.3553,-99.6455],
+    16:[19.5665,-101.7068],17:[18.6813,-99.1013], 18:[21.7514,-104.8455],
+    19:[25.5922,-99.9962], 20:[17.0732,-96.7266], 21:[19.0414,-98.2063],
+    22:[20.5888,-100.3899],23:[19.1817,-88.4791], 24:[22.1565,-100.9855],
+    25:[25.1721,-107.4795],26:[29.2972,-110.3309],27:[17.8409,-92.6189],
+    28:[24.2669,-98.8363], 29:[19.3182,-98.2375], 30:[19.1738,-96.1342],
+    31:[20.7099,-89.0943], 32:[22.7709,-102.5832]
+};
+
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let totalCount = 0;
+let searchTimer = null;
+let map = null;
+let markersLayer = null;
+let polygonsLayer = null;
+let geoJsonLayer = null;
+let currentMode = 'historico';
+let currentAnioHist = 2024;
+let currentAnioPred = 2027;
+let mapViewMode = 'polygons';
+let cachedEstadosGeo = null;
+let selectedEdocve = null;
+let activeRiskFilter = '';
+let activeScenario = 'base';
+let cachedProyeccionData = null;
+
+// Init
+window.addEventListener('DOMContentLoaded', async () => {
+    await loadEstados();
+    await loadGlobalStats();
+    await queryTable();
+    await initMap();
+    loadEstadosSummary();
+    setMode('historico');
+});
+
+// MODE SWITCHER
+function setMode(mode) {
+    currentMode = mode;
+    const bannerH = document.getElementById('banner-historico');
+    const bannerP = document.getElementById('banner-prediccion');
+    const contentH = document.getElementById('content-historico');
+    const contentP = document.getElementById('content-prediccion');
+    const btnH = document.getElementById('btn-mode-historico');
+    const btnP = document.getElementById('btn-mode-prediccion');
+    const modeBadge = document.getElementById('map-mode-badge');
+    const legTag = document.getElementById('legend-mode-tag');
+    const mapSubDesc = document.getElementById('map-sub-desc');
+
+    if (mode === 'historico') {
+        bannerH.classList.remove('hidden');
+        bannerP.classList.add('hidden');
+        contentH.classList.remove('hidden');
+        contentP.classList.add('hidden');
+
+        btnH.className = 'flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-white text-slate-800 shadow-xs border border-slate-200 transition';
+        btnP.className = 'flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-800 transition';
+        document.getElementById('lbl-anio-activo').innerText = currentAnioHist;
+
+        if (modeBadge) {
+            modeBadge.innerText = 'HISTÓRICO ' + currentAnioHist;
+            modeBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200';
+        }
+        if (legTag) legTag.innerText = currentAnioHist + ' Base';
+        const legSub = document.getElementById('legend-escenario-sub');
+        if (legSub) legSub.classList.add('hidden');
+        const legTitle = document.getElementById('legend-title');
+        if (legTitle) legTitle.innerText = 'Simbología de Riesgo';
+        resetLegendItemsToRisk();
+        if (mapSubDesc) {
+            mapSubDesc.innerHTML = '<strong>Capa superpuesta territorial:</strong> Polígonos con tasa promedio de abstención calculada por el modelo sobre el historial electoral. <strong>Haz clic en cualquier estado</strong> para seleccionarlo y focalizar la tabla de secciones.';
+        }
+
+        document.getElementById('kpi-header-title').innerHTML = 'Métricas Nacionales del Proceso <span id="kpi-anio-label">' + currentAnioHist + '</span>';
+        document.getElementById('kpi-lbl-prom').innerText = 'Abstención media';
+        document.getElementById('kpi-sub-prom').innerText = 'Predicción nacional';
+
+        loadGlobalStats();
+        updateMapLayer();
+    } else {
+        bannerH.classList.add('hidden');
+        bannerP.classList.remove('hidden');
+        contentH.classList.add('hidden');
+        contentP.classList.remove('hidden');
+
+        btnP.className = 'flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-ine-wine text-white shadow border border-ine-wine transition';
+        btnH.className = 'flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-800 transition';
+        document.getElementById('lbl-anio-activo').innerText = currentAnioPred + ' (proyección)';
+
+        populatePredEstados();
+        generateProjection();
+        selectScenario(activeScenario || 'base');
+    }
+}
+
+// YEAR CHANGE (historical)
+function onAnioHistChange() {
+    const anio = parseInt(document.getElementById('sel-anio-hist').value);
+    currentAnioHist = anio;
+    document.getElementById('lbl-anio-activo').innerText = anio;
+    const kpiLbl = document.getElementById('kpi-anio-label');
+    if (kpiLbl) kpiLbl.innerText = anio;
+
+    const note = document.getElementById('hist-anio-note');
+    const badge = document.getElementById('badge-tipo-dato');
+    if (anio === 2024) {
+        note.innerHTML = '<strong>Base calibrada del modelo ML:</strong> Modelo XGBoost / CatBoost entrenado sobre historial electoral con variables sociodemográficas.';
+        note.className = 'text-[11px] text-slate-600 mt-1';
+        if (badge) {
+            badge.innerText = 'BASE DEL MODELO';
+            badge.className = 'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200';
+        }
+    } else {
+        note.innerHTML = '<strong>Dato Histórico Observado Oficial INE (' + anio + '):</strong> Participación ciudadana y abstención registrada en las actas de cómputo distrital federal.';
+        note.className = 'text-[11px] text-emerald-800 mt-1 font-medium';
+        if (badge) {
+            badge.innerText = 'HISTÓRICO OBSERVADO';
+            badge.className = 'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200';
+        }
+    }
+    
+    // Animate panels slightly on transition
+    document.getElementById('content-historico')?.classList.add('fade-in');
+    setTimeout(() => document.getElementById('content-historico')?.classList.remove('fade-in'), 300);
+
+    currentPage = 1;
+    loadGlobalStats();
+    queryTable();
+    updateMapLayer();
+}
+
+// YEAR CHANGE (prediction)
+function onAnioPredChange() {
+    const anio = parseInt(document.getElementById('sel-anio-pred').value);
+    currentAnioPred = anio;
+    const nota = document.getElementById('pred-tipo-nota');
+    if (anio === 2027) {
+        nota.innerText = 'Elecciones intermedias: históricamente ~4% más de abstención que presidenciales.';
+    } else {
+        nota.innerText = 'Elecciones presidenciales: tendencia secular de incremento leve (~0.8%) por ciclo.';
+    }
+    document.getElementById('lbl-anio-activo').innerText = anio + ' (proyección)';
+    const modeBadge = document.getElementById('map-mode-badge');
+    if (modeBadge) {
+        modeBadge.innerText = 'PROYECCIÓN FUTURA ' + anio;
+    }
+    const legTag = document.getElementById('legend-mode-tag');
+    if (legTag) legTag.innerText = 'Proyección ' + anio;
+
+    generateProjection();
+    updateMapLayer();
+}
+
+// NUMBER ANIMATION HELPER
+function animateValue(id, start, end, duration = 400, isPercentage = false, isDecimals = false) {
+    const obj = document.getElementById(id);
+    if (!obj) return;
+    const startTime = performance.now();
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Easing out cubic
+        const ease = 1 - Math.pow(1 - progress, 3);
+        const current = start + (end - start) * ease;
+        if (isPercentage) {
+            obj.innerText = current.toFixed(2) + '%';
+        } else if (isDecimals) {
+            obj.innerText = current.toFixed(2);
+        } else {
+            obj.innerText = Math.round(current).toLocaleString();
+        }
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        } else {
+            // Add momentary pulse effect
+            obj.classList.add('pulse-update');
+            setTimeout(() => obj.classList.remove('pulse-update'), 600);
+        }
+    }
+    requestAnimationFrame(update);
+}
+
+// LOAD STATS
+async function loadGlobalStats() {
+    try {
+        const anio = (currentMode === 'historico') ? currentAnioHist : currentAnioPred;
+        const r = await fetch(`/api/stats?anio=${anio}`);
+        const d = await r.json();
+        
+        // Parse current numeric values to animate smoothly
+        const prevTotal = parseInt(document.getElementById('kpi-total').innerText.replace(/,/g, '')) || 70751;
+        const prevProm = parseFloat(document.getElementById('kpi-promedio').innerText) || 46.77;
+        const prevAlto = parseInt(document.getElementById('kpi-alto').innerText.replace(/,/g, '')) || 23584;
+        const prevMedio = parseInt(document.getElementById('kpi-medio').innerText.replace(/,/g, '')) || 23583;
+        const prevBajo = parseInt(document.getElementById('kpi-bajo').innerText.replace(/,/g, '')) || 23584;
+
+        animateValue('kpi-total', prevTotal, d.total_secciones, 450);
+        animateValue('kpi-promedio', prevProm, d.promedio_abstencion, 500, true);
+        animateValue('kpi-alto', prevAlto, d.secciones_alto_riesgo, 450);
+        animateValue('kpi-medio', prevMedio, d.secciones_medio_riesgo, 450);
+        animateValue('kpi-bajo', prevBajo, d.secciones_bajo_riesgo, 450);
+
+        const subAlto = document.getElementById('kpi-sub-alto');
+        if (subAlto) {
+            const pctA = ((d.secciones_alto_riesgo / d.total_secciones) * 100).toFixed(1);
+            subAlto.innerText = `>50.99% - ${pctA}%`;
+        }
+        const subMedio = document.getElementById('kpi-sub-medio');
+        if (subMedio) {
+            const pctM = ((d.secciones_medio_riesgo / d.total_secciones) * 100).toFixed(1);
+            subMedio.innerText = `42-51% - ${pctM}%`;
+        }
+        const subBajo = document.getElementById('kpi-sub-bajo');
+        if (subBajo) {
+            const pctB = ((d.secciones_bajo_riesgo / d.total_secciones) * 100).toFixed(1);
+            subBajo.innerText = `<42.31% - ${pctB}%`;
+        }
+
+    } catch(e) { console.error(e); }
+}
+
+async function loadEstados() {
+    const r = await fetch('/api/estados');
+    const arr = await r.json();
+    ['select-estado', 'sel-resumen-estado'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        arr.forEach(e => {
+            const o = document.createElement('option');
+            o.value = e.EDOCVE;
+            o.innerText = e.EDOCVE.toString().padStart(2,'0') + ' - ' + e.EDONOM;
+            sel.appendChild(o);
+        });
+    });
+}
+
+function populatePredEstados() {
+    const src = document.getElementById('select-estado');
+    const dst = document.getElementById('sel-pred-estado');
+    if (!src || !dst) return;
+    if (dst.children.length > 1) return;
+    [...src.options].forEach((o, i) => {
+        if (i === 0) return;
+        const n = o.cloneNode(true);
+        dst.appendChild(n);
+    });
+}
+
+// ESTADO / MUNICIPIO CHANGE
+async function onEstadoChange() {
+    const edocve = document.getElementById('select-estado').value;
+    const selM = document.getElementById('select-municipio');
+    selM.innerHTML = '<option value="">- Todos los Municipios -</option>';
+
+    if (!edocve) {
+        selM.disabled = true;
+        document.getElementById('map-filter-banner').classList.add('hidden');
+        if (map) map.setView([23.63,-102.55], 5);
+        selectedEdocve = null;
+        updateMapHighlight();
+    } else {
+        selM.disabled = false;
+        const r = await fetch('/api/municipios?edocve=' + edocve);
+        const mpios = await r.json();
+        mpios.forEach(m => {
+            const o = document.createElement('option');
+            o.value = m.MPIOCVE;
+            o.innerText = m.MPIONOM + ' (' + m.total_secciones + ')';
+            selM.appendChild(o);
+        });
+        if (COORDS[edocve] && map) map.setView(COORDS[edocve], 8);
+        selectedEdocve = parseInt(edocve);
+        updateMapHighlight();
+    }
+    currentPage = 1;
+    queryTable();
+}
+
+function onMunicipioChange() { currentPage = 1; queryTable(); }
+function onFilterChange() { currentPage = 1; queryTable(); }
+function debounceSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(() => { currentPage=1; queryTable(); }, 300); }
+
+function resetFilters() {
+    ['select-estado','select-riesgo','input-search'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.getElementById('select-municipio').innerHTML = '<option value="">- Selecciona Estado primero -</option>';
+    document.getElementById('select-municipio').disabled = true;
+    document.getElementById('map-filter-banner').classList.add('hidden');
+    selectedEdocve = null;
+    if (map) map.setView([23.63,-102.55],5);
+    updateMapHighlight();
+    currentPage = 1;
+    queryTable();
+}
+
+function resetPredFilters() {
+    document.getElementById('sel-pred-estado').value = '';
+    document.getElementById('sel-pred-riesgo').value = '';
+    generateProjection();
+}
+
+// QUERY TABLE (HISTÓRICO)
+async function queryTable() {
+    const tbody = document.getElementById('secciones-tbody');
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">Consultando...</td></tr>';
+
+    const edocve = document.getElementById('select-estado').value;
+    const mpio = document.getElementById('select-municipio').value;
+    const riesgo = document.getElementById('select-riesgo').value;
+    const search = document.getElementById('input-search').value;
+    const anio = currentAnioHist || 2024;
+
+    const offset = (currentPage - 1) * PAGE_SIZE;
+    const p = new URLSearchParams({ limit: PAGE_SIZE, offset, anio: anio });
+    if (edocve) p.append('edocve', edocve);
+    if (mpio) p.append('mpiocve', mpio);
+    if (riesgo) p.append('riesgo', riesgo);
+    if (search) p.append('search', search);
+
+    try {
+        const data = await fetch('/api/secciones?' + p).then(r => r.json());
+        totalCount = data.total;
+        const stats = data.stats || {};
+
+        if (currentMode === 'historico') {
+            document.getElementById('kpi-total').innerText = totalCount.toLocaleString();
+            document.getElementById('kpi-promedio').innerText = stats.promedio_abstencion ? stats.promedio_abstencion + '%' : '-';
+            document.getElementById('kpi-alto').innerText = (stats.alto_riesgo || 0).toLocaleString();
+            document.getElementById('kpi-medio').innerText = (stats.medio_riesgo || 0).toLocaleString();
+            document.getElementById('kpi-bajo').innerText = (stats.bajo_riesgo || 0).toLocaleString();
+
+            const isFiltered = totalCount !== 70751;
+            document.getElementById('kpis-context-label').innerText = isFiltered
+                ? 'Filtro activo: ' + totalCount.toLocaleString() + ' de 70,751 secciones'
+                : '70,751 secciones · 32 entidades · 2,477 municipios';
+        }
+
+        document.getElementById('table-count-label').innerText = totalCount.toLocaleString() + ' secciones';
+
+        if (!data.results.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">Sin resultados para los filtros seleccionados.</td></tr>';
+            updatePag(0,0);
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(r => {
+            const pct = r.PREDICCION_PCT;
+            const barColor = r.RIESGO==='ALTO' ? 'bg-red-700' : r.RIESGO==='MEDIO' ? 'bg-amber-600' : 'bg-emerald-700';
+            const tipo = r.TIPOSEC==='U' ? 'Urbana' : r.TIPOSEC==='R' ? 'Rural' : 'Mixta';
+            return `
+            <tr class="interactive-row border-b border-slate-100 transition cursor-pointer" onclick='openModal(${JSON.stringify(r)})'>
+                <td class="py-2.5 px-4 font-mono font-medium text-slate-800">${r.ID_TERRITORIO}</td>
+                <td class="py-2.5 px-4 font-semibold text-slate-900">${r.EDONOM}</td>
+                <td class="py-2.5 px-4 text-slate-600 max-w-[130px] truncate">${r.MPIONOM}</td>
+                <td class="py-2.5 px-3 text-center font-bold text-slate-900">${r.SECCION}</td>
+                <td class="py-2.5 px-3 text-center text-slate-500">${tipo}</td>
+                <td class="py-2.5 px-4">
+                    <div class="flex items-center gap-2">
+                        <div class="w-16 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                            <div class="${barColor} h-full transition-all duration-300" style="width:${Math.min(100,pct)}%"></div>
+                        </div>
+                        <span class="font-bold text-slate-900 font-mono">${pct.toFixed(2)}%</span>
+                    </div>
+                </td>
+                <td class="py-2.5 px-4 text-center">
+                    <span class="px-2.5 py-0.5 text-[11px] font-bold rounded risk-${r.RIESGO}">${r.RIESGO}</span>
+                </td>
+                <td class="py-2.5 px-4 text-center">
+                    <button class="text-xs text-ine-wine font-bold hover:underline">Ficha</button>
+                </td>
+            </tr>`;
+        }).join('');
+        updatePag(offset, data.results.length);
+    } catch(e) {
+        console.error(e);
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-red-600">Error al cargar datos.</td></tr>';
+    }
+}
+
+function updatePag(offset, n) {
+    const s = totalCount > 0 ? offset+1 : 0;
+    document.getElementById('pagination-info').innerText = `Mostrando ${s.toLocaleString()} - ${(offset+n).toLocaleString()} de ${totalCount.toLocaleString()}`;
+    document.getElementById('page-num').innerText = currentPage;
+    document.getElementById('btn-prev').disabled = currentPage <= 1;
+    document.getElementById('btn-next').disabled = (offset+n) >= totalCount;
+}
+function prevPage() { if (currentPage>1) { currentPage--; queryTable(); } }
+function nextPage() { if (currentPage*PAGE_SIZE < totalCount) { currentPage++; queryTable(); } }
+
+function exportCurrentViewCSV() {
+    const edocve = document.getElementById('select-estado').value;
+    const mpio = document.getElementById('select-municipio').value;
+    const riesgo = document.getElementById('select-riesgo').value;
+    const search = document.getElementById('input-search').value;
+    const p = new URLSearchParams({ anio: 2024 });
+    if (edocve) p.append('edocve', edocve);
+    if (mpio) p.append('mpiocve', mpio);
+    if (riesgo) p.append('riesgo', riesgo);
+    if (search) p.append('search', search);
+    window.open('/api/export?' + p.toString(), '_blank');
+}
+
+// =========================================================================
+// LÓGICA DEL MAPA (PERSISTENTE PARA AMBOS MODOS)
+// =========================================================================
+function getRiskColor(pct) {
+    if (pct > 50.99) return '#991B1B';      // Alto riesgo
+    if (pct >= 42.31) return '#B45309';     // Medio riesgo
+    return '#166534';                      // Bajo riesgo
+}
+
+function getImpactoColor(mitigacion) {
+    if (mitigacion >= 3.0) return '#065F46'; // Verde oscuro institucional: Máxima mitigación (>3 pp)
+    if (mitigacion >= 2.0) return '#0D9488'; // Teal: Mitigación media (2 pp)
+    return '#10B981';                       // Verde esmeralda: Mitigación preventiva (1 pp)
+}
+
+function resetLegendItemsToRisk() {
+    const container = document.getElementById('legend-items-container');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#991B1B] border border-red-900 inline-block opacity-85"></span>
+            <span class="text-slate-800 font-medium">ALTO RIESGO (&gt; 50.99%)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#B45309] border border-amber-900 inline-block opacity-85"></span>
+            <span class="text-slate-800 font-medium">RIESGO MEDIO (42.31% - 50.99%)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#166534] border border-emerald-900 inline-block opacity-85"></span>
+            <span class="text-slate-800 font-medium">BAJO RIESGO (&lt; 42.31%)</span>
+        </div>
+    `;
+}
+
+function setLegendItemsToImpacto() {
+    const container = document.getElementById('legend-items-container');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#065F46] border border-emerald-900 inline-block opacity-90"></span>
+            <span class="text-slate-800 font-medium">ALTA MITIGACIÓN (&ge; 3.0 pp)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#0D9488] border border-teal-900 inline-block opacity-90"></span>
+            <span class="text-slate-800 font-medium">MITIGACIÓN MEDIA (2.0 - 2.9 pp)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded bg-[#10B981] border border-emerald-700 inline-block opacity-90"></span>
+            <span class="text-slate-800 font-medium">CONSOLIDACIÓN (1.0 - 1.9 pp)</span>
+        </div>
+    `;
+}
+
+// SELECTOR DE ESCENARIOS (CONECTADO AL MAPA Y A LA TABLA)
+function selectScenario(scenario) {
+    activeScenario = scenario;
+
+    // 1. Actualizar apariencia visual de las 3 tarjetas
+    const cardBase = document.getElementById('card-escenario-base');
+    const cardInterv = document.getElementById('card-escenario-interv');
+    const cardImpacto = document.getElementById('card-escenario-impacto');
+
+    const badgeBase = document.getElementById('badge-scen-base');
+    const badgeInterv = document.getElementById('badge-scen-interv');
+    const badgeImpacto = document.getElementById('badge-scen-impacto');
+
+    // Resetear tarjetas
+    if (cardBase) {
+        cardBase.className = 'scenario-card p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2 opacity-80 hover:opacity-100 transition-all';
+        if (badgeBase) {
+            badgeBase.className = 'text-[10px] font-medium text-slate-500';
+            badgeBase.innerText = 'Clic para ver en mapa';
+        }
+    }
+    if (cardInterv) {
+        cardInterv.className = 'scenario-card p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2 opacity-80 hover:opacity-100 transition-all';
+        if (badgeInterv) {
+            badgeInterv.className = 'text-[10px] font-medium text-emerald-700';
+            badgeInterv.innerText = 'Clic para ver en mapa';
+        }
+    }
+    if (cardImpacto) {
+        cardImpacto.className = 'scenario-card p-3.5 rounded-xl border border-ine-border bg-ine-light/30 space-y-2 opacity-80 hover:opacity-100 transition-all';
+        if (badgeImpacto) {
+            badgeImpacto.className = 'text-[10px] font-medium text-ine-wine';
+            badgeImpacto.innerText = 'Clic para ver en mapa';
+        }
+    }
+
+    // Resaltar tarjeta activa
+    if (scenario === 'base') {
+        if (cardBase) {
+            cardBase.className = 'scenario-card scenario-active p-3.5 rounded-xl border-2 border-slate-700 bg-white space-y-2 shadow-md opacity-100 transition-all';
+            if (badgeBase) {
+                badgeBase.className = 'text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-white';
+                badgeBase.innerText = 'Activo en mapa';
+            }
+        }
+    } else if (scenario === 'intervencion') {
+        if (cardInterv) {
+            cardInterv.className = 'scenario-card scenario-active p-3.5 rounded-xl border-2 border-emerald-600 bg-emerald-50 space-y-2 shadow-md opacity-100 transition-all';
+            if (badgeInterv) {
+                badgeInterv.className = 'text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-700 text-white';
+                badgeInterv.innerText = 'Activo en mapa';
+            }
+        }
+    } else if (scenario === 'impacto') {
+        if (cardImpacto) {
+            cardImpacto.className = 'scenario-card scenario-active p-3.5 rounded-xl border-2 border-ine-wine bg-rose-50/70 space-y-2 shadow-md opacity-100 transition-all';
+            if (badgeImpacto) {
+                badgeImpacto.className = 'text-[10px] font-bold px-2 py-0.5 rounded bg-ine-wine text-white';
+                badgeImpacto.innerText = 'Activo en mapa';
+            }
+        }
+    }
+
+    // 2. Sincronizar badges, encabezados y leyendas del mapa
+    const modeBadge = document.getElementById('map-mode-badge');
+    const legTag = document.getElementById('legend-mode-tag');
+    const legSub = document.getElementById('legend-escenario-sub');
+    const legTitle = document.getElementById('legend-title');
+    const mapSubDesc = document.getElementById('map-sub-desc');
+
+    if (legSub) legSub.classList.remove('hidden');
+
+    if (scenario === 'base') {
+        if (modeBadge) {
+            modeBadge.innerText = 'PROYECCIÓN ' + currentAnioPred + ' · ESCENARIO A (BASE)';
+            modeBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-white border border-slate-700';
+        }
+        if (legTag) legTag.innerText = 'Esc. A (Base)';
+        if (legSub) legSub.innerText = 'Escenario activo: Sin intervención (Base)';
+        if (legTitle) legTitle.innerText = 'Simbología de Riesgo';
+        resetLegendItemsToRisk();
+        if (mapSubDesc) {
+            mapSubDesc.innerHTML = '<strong>Capa prospectiva territorial (Escenario A - Inercial):</strong> El mapa muestra la abstención esperada según la trayectoria del modelo predictivo sin reforzamiento institucional extraordinario.';
+        }
+    } else if (scenario === 'intervencion') {
+        if (modeBadge) {
+            modeBadge.innerText = 'PROYECCIÓN ' + currentAnioPred + ' · ESCENARIO B (CON INTERVENCIÓN)';
+            modeBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400';
+        }
+        if (legTag) legTag.innerText = 'Esc. B (Intervención)';
+        if (legSub) legSub.innerText = 'Escenario activo: Con intervención institucional';
+        if (legTitle) legTitle.innerText = 'Simbología de Riesgo Adaptado';
+        resetLegendItemsToRisk();
+        if (mapSubDesc) {
+            mapSubDesc.innerHTML = '<strong>Capa prospectiva territorial (Escenario B - Simulación Preventiva):</strong> El mapa refleja la abstención recalculada tras aplicar intervenciones de brigadas territoriales y promoción ciudadana focalizada.';
+        }
+    } else if (scenario === 'impacto') {
+        if (modeBadge) {
+            modeBadge.innerText = 'PROYECCIÓN ' + currentAnioPred + ' · DIFERENCIAL PREVENTIVO (IMPACTO)';
+            modeBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-ine-wine text-white border border-ine-dark';
+        }
+        if (legTag) legTag.innerText = 'Diferencial';
+        if (legSub) legSub.innerText = 'Escenario activo: Impacto y mitigación';
+        if (legTitle) legTitle.innerText = 'Diferencial de Mitigación';
+        setLegendItemsToImpacto();
+        if (mapSubDesc) {
+            mapSubDesc.innerHTML = '<strong>Capa territorial de mitigación:</strong> Se destacan en tonalidades verdes y teal los territorios donde la intervención institucional produce mayor reducción de abstención y traspaso de secciones.';
+        }
+    }
+
+    // 3. Sincronizar encabezados y filas de la tabla
+    const thBase = document.getElementById('th-col-base');
+    const thInterv = document.getElementById('th-col-interv');
+    const thDiff = document.getElementById('th-col-diff');
+    const thRBase = document.getElementById('th-col-rbase');
+    const thRInterv = document.getElementById('th-col-rinterv');
+
+    [thBase, thInterv, thDiff, thRBase, thRInterv].forEach(el => {
+        if (el) el.className = el.className.replace(/bg-amber-100|bg-emerald-100|bg-rose-100|bg-slate-200\/90|bg-slate-200\/80|bg-slate-200\/50|bg-emerald-50|border-x border-slate-300|border-x border-emerald-300|border-x border-rose-300|font-bold/g, '').trim();
+    });
+
+    if (scenario === 'base') {
+        if (thBase) thBase.className += ' bg-slate-200/90 text-slate-900 border-x border-slate-300 font-bold';
+        if (thRBase) thRBase.className += ' bg-slate-200/50 text-slate-900 font-bold';
+    } else if (scenario === 'intervencion') {
+        if (thInterv) thInterv.className += ' bg-emerald-100 text-emerald-950 border-x border-emerald-300 font-bold';
+        if (thRInterv) thRInterv.className += ' bg-emerald-50 text-emerald-950 font-bold';
+    } else if (scenario === 'impacto') {
+        if (thDiff) thDiff.className += ' bg-rose-100 text-rose-950 border-x border-rose-300 font-bold';
+    }
+
+    if (cachedProyeccionData && cachedProyeccionData.muestra_secciones) {
+        const tbody = document.getElementById('pred-tbody');
+        if (tbody) {
+            tbody.innerHTML = cachedProyeccionData.muestra_secciones.map(r => {
+                const base = (r.PREDICCION_BASE_2024 * 100).toFixed(2);
+                const proy = r.PREDICCION_PROYECTADA_PCT;
+                const interv = r.ABSTENCION_INTERVENCION_PCT !== undefined ? r.ABSTENCION_INTERVENCION_PCT : (proy - 2.5).toFixed(2);
+                const diff = r.DIFERENCIA_ESCENARIOS_PCT !== undefined ? r.DIFERENCIA_ESCENARIOS_PCT : -2.50;
+                const diffSign = diff >= 0 ? '+' : '';
+                const diffColor = diff <= 0 ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold';
+                const rBase = r.RIESGO_PROYECTADO || r.RIESGO;
+                const rInterv = r.RIESGO_INTERVENCION || rBase;
+                const rowJson = JSON.stringify(r).replace(/"/g, '&quot;');
+
+                const colBaseClass = (activeScenario === 'base') ? 'bg-slate-100 font-bold text-slate-900 border-x border-slate-200' : 'text-slate-700 font-medium';
+                const colIntervClass = (activeScenario === 'intervencion') ? 'bg-emerald-100/70 font-black text-emerald-950 border-x border-emerald-300' : 'font-bold text-emerald-800';
+                const colDiffClass = (activeScenario === 'impacto') ? 'bg-rose-100/70 font-black border-x border-rose-300 ' + diffColor : diffColor;
+
+                return `
+                <tr class="hover:bg-slate-50 border-b border-slate-100 transition">
+                    <td class="py-2 px-4 font-mono text-slate-700">${r.ID_TERRITORIO}</td>
+                    <td class="py-2 px-4 font-semibold text-slate-900">${r.EDONOM}</td>
+                    <td class="py-2 px-3 text-center font-bold">${r.SECCION}</td>
+                    <td class="py-2 px-4 ${colBaseClass}">${proy}%</td>
+                    <td class="py-2 px-4 ${colIntervClass}">${interv}%</td>
+                    <td class="py-2 px-4 text-center ${colDiffClass}">${diffSign}${diff}%</td>
+                    <td class="py-2 px-4 text-center"><span class="px-2 py-0.5 text-[10px] font-bold rounded risk-${rBase}">${rBase}</span></td>
+                    <td class="py-2 px-4 text-center"><span class="px-2 py-0.5 text-[10px] font-bold rounded risk-${rInterv}">${rInterv}</span></td>
+                    <td class="py-2 px-3 text-center">
+                        <button onclick="openModal(${rowJson})" class="text-xs text-ine-wine font-bold hover:underline">Ficha</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    // 4. Sincronizar KPIs según el escenario
+    if (cachedProyeccionData && cachedProyeccionData.escenarios) {
+        const sc = cachedProyeccionData.escenarios;
+        const prevProm = parseFloat(document.getElementById('kpi-promedio')?.innerText) || 46.77;
+        const prevAlto = parseInt(document.getElementById('kpi-alto')?.innerText.replace(/,/g, '')) || 23584;
+
+        if (scenario === 'base') {
+            document.getElementById('kpi-lbl-prom').innerText = 'Abstención Proyectada (Base)';
+            animateValue('kpi-promedio', prevProm, sc.promedio_base, 350, true);
+            animateValue('kpi-alto', prevAlto, sc.secciones_alto_riesgo_base, 350);
+            document.getElementById('kpi-sub-prom').innerText = 'Escenario A inercial';
+        } else if (scenario === 'intervencion') {
+            document.getElementById('kpi-lbl-prom').innerText = 'Abstención Simulada (Con Interv.)';
+            animateValue('kpi-promedio', prevProm, sc.promedio_intervencion, 350, true);
+            animateValue('kpi-alto', prevAlto, sc.secciones_alto_riesgo_intervencion, 350);
+            document.getElementById('kpi-sub-prom').innerText = 'Escenario B simulado';
+        } else if (scenario === 'impacto') {
+            document.getElementById('kpi-lbl-prom').innerText = 'Mejora Global Estimada';
+            const kpiProm = document.getElementById('kpi-promedio');
+            if (kpiProm) kpiProm.innerText = (sc.diferencia_global_pct >= 0 ? '+' : '') + sc.diferencia_global_pct.toFixed(2) + '%';
+            animateValue('kpi-alto', prevAlto, sc.secciones_mitigadas, 350);
+            document.getElementById('kpi-sub-prom').innerText = 'Reducción de abstención';
+        }
+    }
+
+    // 5. Actualizar el mapa territorial suavemente
+    const mapEl = document.getElementById('map');
+    if (mapEl) {
+        mapEl.style.transition = 'opacity 0.2s ease';
+        mapEl.style.opacity = '0.7';
+    }
+    updateMapLayer().then(() => {
+        if (mapEl) setTimeout(() => { mapEl.style.opacity = '1'; }, 100);
+    });
+}
+
+function getRiskCategory(pct) {
+    if (pct > 50.99) return 'ALTO';
+    if (pct >= 42.31) return 'MEDIO';
+    return 'BAJO';
+}
+
+function setMapViewMode(mode) {
+    mapViewMode = mode;
+    const btnP = document.getElementById('btn-view-poly');
+    const btnB = document.getElementById('btn-view-bubbles');
+    if (mode === 'polygons') {
+        btnP.className = 'px-2.5 py-1 rounded-md bg-white text-slate-800 shadow-xs transition';
+        btnB.className = 'px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 transition';
+        if (markersLayer && map.hasLayer(markersLayer)) map.removeLayer(markersLayer);
+        if (polygonsLayer && !map.hasLayer(polygonsLayer)) map.addLayer(polygonsLayer);
+    } else {
+        btnB.className = 'px-2.5 py-1 rounded-md bg-white text-slate-800 shadow-xs transition';
+        btnP.className = 'px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 transition';
+        if (polygonsLayer && map.hasLayer(polygonsLayer)) map.removeLayer(polygonsLayer);
+        if (markersLayer && !map.hasLayer(markersLayer)) map.addLayer(markersLayer);
+    }
+}
+
+async function initMap() {
+    map = L.map('map', { zoomControl: true, attributionControl: false }).setView([23.63, -102.55], 5);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: 'OpenStreetMap contributors'
+    }).addTo(map);
+
+    polygonsLayer = L.layerGroup().addTo(map);
+    markersLayer = L.layerGroup();
+
+    await updateMapLayer();
+}
+
+function updateMapHighlight() {
+    if (!polygonsLayer) return;
+    polygonsLayer.eachLayer(layerGroup => {
+        if (layerGroup.eachLayer) {
+            layerGroup.eachLayer(l => {
+                const p = l.feature?.properties;
+                if (!p) return;
+                const isSelected = (selectedEdocve === p.EDOCVE);
+                
+                // Si hay un filtro de cubo de riesgo activo
+                const pct = (currentMode === 'prediccion')
+                    ? (p.PROMEDIO_ABSTENCION_PROYECTADA || p.PROMEDIO_ABSTENCION_PRED)
+                    : (p.PROMEDIO_ABSTENCION_ANIO || p.PROMEDIO_ABSTENCION_PRED);
+                const riesgo = (currentMode === 'prediccion')
+                    ? (p.RIESGO_PROYECTADO || getRiskCategory(pct))
+                    : (p.RIESGO_ANIO || getRiskCategory(pct));
+                
+                let matchesRisk = true;
+                if (activeRiskFilter && activeRiskFilter !== 'TODOS' && activeRiskFilter !== 'PROMEDIO') {
+                    matchesRisk = (riesgo === activeRiskFilter);
+                }
+
+                l.setStyle({
+                    weight: isSelected ? 3.5 : (matchesRisk && activeRiskFilter ? 2.5 : 1.2),
+                    color: isSelected ? '#1E293B' : (matchesRisk && activeRiskFilter ? '#B91C1C' : '#FFFFFF'),
+                    fillOpacity: isSelected ? 0.90 : (matchesRisk ? 0.65 : 0.15)
+                });
+            });
+        }
+    });
+}
+
+async function updateMapLayer() {
+    if (!map) return;
+
+    polygonsLayer.clearLayers();
+    markersLayer.clearLayers();
+
+    const isPrediction = (currentMode === 'prediccion');
+    const anio = isPrediction ? currentAnioPred : currentAnioHist;
+
+    try {
+        let geoUrl = isPrediction 
+            ? `/api/geo/proyeccion?anio_objetivo=${anio}&escenario=${activeScenario}` 
+            : `/api/geo/estados?anio=${anio}`;
+        const geoData = await fetch(geoUrl).then(r => r.json());
+        cachedEstadosGeo = geoData;
+
+        // Polygons layer
+        const polyGeo = L.geoJSON(geoData, {
+            style: function(feature) {
+                const p = feature.properties || {};
+                const pct = isPrediction 
+                    ? (p.PROMEDIO_ABSTENCION_PROYECTADA || p.PROMEDIO_ABSTENCION_PRED) 
+                    : (p.PROMEDIO_ABSTENCION_ANIO || p.PROMEDIO_ABSTENCION_PRED);
+                const riesgo = isPrediction 
+                    ? (p.RIESGO_PROYECTADO || getRiskCategory(pct)) 
+                    : (p.RIESGO_ANIO || getRiskCategory(pct));
+                const isSelected = (selectedEdocve === p.EDOCVE);
+
+                let matchesRisk = true;
+                if (activeRiskFilter && activeRiskFilter !== 'TODOS' && activeRiskFilter !== 'PROMEDIO') {
+                    matchesRisk = (riesgo === activeRiskFilter);
+                }
+
+                // Determinación del color según escenario activo
+                let fillColor;
+                if (isPrediction && activeScenario === 'impacto') {
+                    const mitigacion = p.MITIGACION_PP || Math.abs(p.DELTA_PCT) || 2.0;
+                    fillColor = getImpactoColor(mitigacion);
+                } else {
+                    fillColor = getRiskColor(pct);
+                }
+
+                return {
+                    fillColor: fillColor,
+                    weight: isSelected ? 3.5 : (matchesRisk && activeRiskFilter ? 2.5 : 1.2),
+                    opacity: 1,
+                    color: isSelected ? '#1E293B' : (matchesRisk && activeRiskFilter ? '#991B1B' : '#FFFFFF'),
+                    fillOpacity: isSelected ? 0.90 : (matchesRisk ? 0.68 : 0.15)
+                };
+            },
+            onEachFeature: function(feature, layer) {
+                const p = feature.properties || {};
+                const pct = isPrediction 
+                    ? (p.PROMEDIO_ABSTENCION_PROYECTADA || p.PROMEDIO_ABSTENCION_PRED) 
+                    : (p.PROMEDIO_ABSTENCION_ANIO || p.PROMEDIO_ABSTENCION_PRED);
+                const riesgo = isPrediction 
+                    ? (p.RIESGO_PROYECTADO || getRiskCategory(pct)) 
+                    : (p.RIESGO_ANIO || getRiskCategory(pct));
+                const totalSec = p.TOTAL_SECCIONES || 0;
+                const altoSec = p.SECCIONES_RIESGO_ALTO || 0;
+                const altoPct = p.PORC_SECCIONES_ALTO_RIESGO || (totalSec ? ((altoSec/totalSec)*100).toFixed(1) : 0);
+
+                let modoLabel = '';
+                let deltaLabel = '';
+                let metricDisplay = '';
+
+                if (!isPrediction) {
+                    modoLabel = `HISTÓRICO ${anio}`;
+                    deltaLabel = `<div class="text-[11px] text-slate-500">${p.DESC_ANIO || 'Observación electoral oficial'}</div>`;
+                    metricDisplay = `<div style="color:#6A1B31; font-weight:800; font-size:14px; margin-bottom:2px">
+                        ${pct.toFixed(2)}% <span style="font-size:10px; font-weight:600; color:#64748B">abstención observada</span>
+                    </div>`;
+                } else if (activeScenario === 'intervencion') {
+                    modoLabel = `PROYECCIÓN ${anio} · ESCENARIO B`;
+                    deltaLabel = `
+                        <div class="text-[11px] text-emerald-800 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1">
+                            Simulación preventiva: -${(p.REDUCCION_APLICADA || 2.0).toFixed(1)} pp de abstención
+                        </div>
+                    `;
+                    metricDisplay = `<div style="color:#065F46; font-weight:800; font-size:14px; margin-bottom:2px">
+                        ${pct.toFixed(2)}% <span style="font-size:10px; font-weight:600; color:#047857">abstención con intervención</span>
+                    </div>`;
+                } else if (activeScenario === 'impacto') {
+                    modoLabel = `DIFERENCIAL DE IMPACTO ${anio}`;
+                    const mitig = (p.MITIGACION_PP || Math.abs(p.DELTA_PCT) || 2.0).toFixed(1);
+                    const baseVal = (p.VALOR_BASE || (pct + 2.0)).toFixed(2);
+                    const intervVal = (p.VALOR_INTERVENCION || pct).toFixed(2);
+                    const cambioRiesgoHtml = p.CAMBIO_RIESGO 
+                        ? `<div class="mt-1 text-[10px] font-bold text-emerald-900 bg-emerald-100 px-1.5 py-0.5 rounded">Reclasificación favorable de riesgo lograda</div>`
+                        : '';
+                    deltaLabel = `
+                        <div class="text-[11px] text-slate-600 mt-1">
+                            Base: <strong>${baseVal}%</strong> &rarr; Con Intervención: <strong class="text-emerald-800">${intervVal}%</strong>
+                        </div>
+                        ${cambioRiesgoHtml}
+                    `;
+                    metricDisplay = `<div style="color:#065F46; font-weight:800; font-size:14px; margin-bottom:2px">
+                        -${mitig} pp <span style="font-size:10px; font-weight:600; color:#047857">reducción preventiva estimada</span>
+                    </div>`;
+                } else {
+                    modoLabel = `PROYECCIÓN ${anio} · ESCENARIO A`;
+                    deltaLabel = `<div class="text-[11px] text-amber-700 font-semibold">Diferencial prospectivo: <strong>+${p.DELTA_PCT || 0}%</strong></div>`;
+                    metricDisplay = `<div style="color:#6A1B31; font-weight:800; font-size:14px; margin-bottom:2px">
+                        ${pct.toFixed(2)}% <span style="font-size:10px; font-weight:600; color:#64748B">abstención inercial proyectada</span>
+                    </div>`;
+                }
+
+                const tooltipContent = `
+                    <div style="font-family:inherit; min-width:190px; font-size:12px">
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #E2E8F0; padding-bottom:4px; margin-bottom:4px">
+                            <strong style="color:#0F172A; font-size:13px">${p.EDONOM}</strong>
+                            <span style="font-size:9px; font-weight:700; padding:1px 5px; border-radius:4px; background:${riesgo==='ALTO'?'#FEE2E2':riesgo==='MEDIO'?'#FEF3C7':'#DCFCE7'}; color:${riesgo==='ALTO'?'#991B1B':riesgo==='MEDIO'?'#92400E':'#166534'}">${riesgo}</span>
+                        </div>
+                        ${metricDisplay}
+                        ${deltaLabel}
+                        <div style="color:#475569; font-size:11px; margin-top:4px">
+                            Secciones electorales: <strong>${totalSec.toLocaleString()}</strong><br>
+                            Secciones alto riesgo: <strong style="color:#991B1B">${altoSec.toLocaleString()} (${altoPct}%)</strong>
+                        </div>
+                        <div style="margin-top:6px; font-size:10px; color:#6A1B31; font-weight:700">
+                            Clic para seleccionar territorio y filtrar datos
+                        </div>
+                    </div>
+                `;
+                layer.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });
+
+                layer.on({
+                    mouseover: function(e) {
+                        const l = e.target;
+                        if (selectedEdocve !== p.EDOCVE) {
+                            l.setStyle({ weight: 2.5, color: '#475569', fillOpacity: 0.75 });
+                        }
+                        const hoverBox = document.getElementById('map-hover-box');
+                        if (hoverBox) {
+                            document.getElementById('hover-state-name').innerText = p.EDONOM;
+                            if (isPrediction && activeScenario === 'impacto') {
+                                const mitig = (p.MITIGACION_PP || 2.0).toFixed(1);
+                                document.getElementById('hover-state-abst').innerText = `-${mitig} pp de abstención (${modoLabel})`;
+                            } else {
+                                document.getElementById('hover-state-abst').innerText = pct.toFixed(2) + '% abstención (' + modoLabel + ')';
+                            }
+                            const rEl = document.getElementById('hover-state-risk');
+                            rEl.innerText = 'Riesgo: ' + riesgo + ' · ' + totalSec.toLocaleString() + ' secciones';
+                            rEl.className = 'text-[10px] font-bold mt-1 text-' + (riesgo==='ALTO'?'red-700':riesgo==='MEDIO'?'amber-700':'emerald-700');
+                            hoverBox.classList.remove('hidden');
+                        }
+                    },
+                    mouseout: function(e) {
+                        const l = e.target;
+                        if (selectedEdocve !== p.EDOCVE) {
+                            polyGeo.resetStyle(l);
+                        }
+                        const hoverBox = document.getElementById('map-hover-box');
+                        if (hoverBox) hoverBox.classList.add('hidden');
+                    },
+                    click: function(e) {
+                        selectStateOnMap(p.EDOCVE, p.EDONOM, pct.toFixed(2), totalSec, p, layer);
+                    }
+                });
+            }
+        });
+        polygonsLayer.addLayer(polyGeo);
+
+        // Bubbles layer
+        const estados = await fetch('/api/resumen/estados').then(r => r.json());
+        const maxSec = Math.max(...estados.map(e => e.TOTAL_SECCIONES));
+        const minSec = Math.min(...estados.map(e => e.TOTAL_SECCIONES));
+
+        estados.forEach(e => {
+            const coords = COORDS[e.EDOCVE];
+            if (!coords) return;
+
+            let pctAbst = (e.PROMEDIO_ABSTENCION_PRED * 100);
+            const factorAnio = isPrediction 
+                ? ({ 2027: 1.042, 2030: 1.008 }[anio] || 1.025)
+                : ({ 2009: 55.39/46.77, 2012: 36.92/46.77, 2015: 52.28/46.77, 2018: 36.58/46.77, 2021: 47.34/46.77, 2024: 1.0 }[anio] || 1.0);
+            pctAbst = Math.min(95, Math.max(15, pctAbst * factorAnio));
+
+            if (isPrediction && activeScenario === 'intervencion') {
+                pctAbst = Math.max(10, pctAbst - 2.0);
+            }
+
+            const pctStr = pctAbst.toFixed(2);
+            const normalizedR = 8 + ((e.TOTAL_SECCIONES - minSec) / (maxSec - minSec)) * 18;
+            let fillColor = getRiskColor(pctAbst);
+            if (isPrediction && activeScenario === 'impacto') {
+                fillColor = '#065F46';
+            }
+
+            const circle = L.circleMarker(coords, {
+                radius: normalizedR,
+                fillColor: fillColor,
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.85
+            });
+
+            const popupContent = `
+                <div style="font-size:12px;min-width:210px">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+                        <strong style="font-size:13px">${e.EDONOM}</strong>
+                        <span style="font-size:9px; background:#F1F5F9; padding:2px 4px; border-radius:3px; font-weight:700">${isPrediction ? 'PROY '+anio+' ('+activeScenario.toUpperCase()+')' : 'BASE 2024'}</span>
+                    </div>
+                    <hr style="margin:4px 0;border-color:#e2e8f0">
+                    <div>Abstención estimada: <strong style="color:#6A1B31">${pctStr}%</strong></div>
+                    <div>Total secciones: <strong>${e.TOTAL_SECCIONES.toLocaleString()}</strong></div>
+                    <div>Alto riesgo: <strong style="color:#991B1B">${e.SECCIONES_RIESGO_ALTO.toLocaleString()} (${e.PORC_SECCIONES_ALTO_RIESGO.toFixed(1)}%)</strong></div>
+                    <hr style="margin:6px 0;border-color:#e2e8f0">
+                    <button onclick="filterByMap(${e.EDOCVE}, '${e.EDONOM}', '${pctStr}', ${e.TOTAL_SECCIONES})"
+                        style="width:100%;background:#6A1B31;color:#fff;border:none;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
+                        Filtrar secciones de este Estado
+                    </button>
+                </div>
+            `;
+            circle.bindPopup(popupContent, { maxWidth: 260 });
+            markersLayer.addLayer(circle);
+        });
+
+        if (mapViewMode === 'bubbles') {
+            if (map.hasLayer(polygonsLayer)) map.removeLayer(polygonsLayer);
+            if (!map.hasLayer(markersLayer)) map.addLayer(markersLayer);
+        } else {
+            if (map.hasLayer(markersLayer)) map.removeLayer(markersLayer);
+            if (!map.hasLayer(polygonsLayer)) map.addLayer(polygonsLayer);
+        }
+
+    } catch(err) {
+        console.error('Error actualizando capa territorial del mapa:', err);
+    }
+}
+
+function selectStateOnMap(edocve, edonom, pctAbst, totalSec, properties, layer) {
+    selectedEdocve = edocve;
+    window.lastSelectedStateProps = properties;
+
+    updateMapHighlight();
+
+    if (layer && layer.getBounds) {
+        map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 8 });
+    } else if (COORDS[edocve]) {
+        map.setView(COORDS[edocve], 8);
+    }
+
+    // Sincronizar selectores en ambos modos
+    const selEstado = document.getElementById('select-estado');
+    if (selEstado) {
+        selEstado.value = edocve;
+        if (currentMode === 'historico') onEstadoChange();
+    }
+    const selPredEdo = document.getElementById('sel-pred-estado');
+    if (selPredEdo) {
+        selPredEdo.value = edocve;
+        if (currentMode === 'prediccion') generateProjection();
+    }
+
+    const banner = document.getElementById('map-filter-banner');
+    if (banner) {
+        document.getElementById('map-filter-label').innerText =
+            `${edonom} - ${parseInt(totalSec).toLocaleString()} secciones | Abstención media: ${pctAbst}%`;
+        banner.classList.remove('hidden');
+    }
+
+    if (currentMode === 'historico') {
+        setTimeout(() => {
+            document.getElementById('secciones-tbody')?.closest('section')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
+    } else {
+        setTimeout(() => {
+            document.getElementById('pred-results')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
+    }
+}
+
+function viewStateDetail() {
+    if (!selectedEdocve) return;
+    const p = window.lastSelectedStateProps || {};
+    const mockSec = {
+        SECCION: 'CONSOLIDADO',
+        EDOCVE: selectedEdocve,
+        EDONOM: p.EDONOM || 'Estado',
+        MPIOCVE: 0,
+        MPIONOM: 'Todos los municipios (' + (p.TOTAL_SECCIONES||0) + ' secciones)',
+        ID_TERRITORIO: 'EDO-' + selectedEdocve.toString().padStart(2, '0'),
+        TIPOSEC: 'M',
+        PREDICCION_PCT: p.PROMEDIO_ABSTENCION_PRED || 46.77,
+        RIESGO: p.RIESGO || getRiskCategory(p.PROMEDIO_ABSTENCION_PRED || 46.77)
+    };
+    openModal(mockSec);
+}
+
+function filterByMap(edocve, edonom, pctAbst, totalSec) {
+    if (map) map.closePopup();
+    selectStateOnMap(edocve, edonom, pctAbst, totalSec, { EDONOM: edonom, TOTAL_SECCIONES: totalSec, PROMEDIO_ABSTENCION_PRED: parseFloat(pctAbst) }, null);
+}
+
+function clearMapFilter() {
+    selectedEdocve = null;
+    window.lastSelectedStateProps = null;
+    resetFilters();
+    const selPredEdo = document.getElementById('sel-pred-estado');
+    if (selPredEdo) selPredEdo.value = '';
+    if (currentMode === 'prediccion') generateProjection();
+    updateMapHighlight();
+}
+
+function handleGeoJsonUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        try {
+            const geojson = JSON.parse(ev.target.result);
+            if (geoJsonLayer) map.removeLayer(geoJsonLayer);
+            geoJsonLayer = L.geoJSON(geojson, {
+                style: () => ({ color:'#6A1B31', weight:1.5, fillColor:'#FCA5A5', fillOpacity:0.45 }),
+                onEachFeature: (f, l) => {
+                    const p = f.properties || {};
+                    const sec = p.SECCION || p.seccion || 'N/D';
+                    const mpio = p.MUNICIPIO || p.mpionom || 'N/D';
+                    const abst = p.PREDICCION_ABSTENCION ? (p.PREDICCION_ABSTENCION*100).toFixed(2)+'%' : 'Consultar tabla';
+                    l.bindPopup(`
+                        <div class="text-xs">
+                            <strong style="color:#6A1B31">Sección Electoral ${sec}</strong><br>
+                            Municipio: <strong>${mpio}</strong><br>
+                            Abstención Predicha: <strong>${abst}</strong>
+                        </div>
+                    `);
+                }
+            }).addTo(map);
+            map.fitBounds(geoJsonLayer.getBounds());
+            alert('Capa seccional GeoJSON conectada exitosamente.');
+        } catch(err) {
+            alert('Error: Archivo GeoJSON no válido o con formato corrupto.');
+        }
+    };
+    reader.readAsText(file);
+}
+
+// GENERATE PROJECTION
+async function generateProjection() {
+    const anio = parseInt(document.getElementById('sel-anio-pred').value);
+    const edocve = document.getElementById('sel-pred-estado').value;
+    const riesgo = document.getElementById('sel-pred-riesgo').value;
+
+    const btn = document.getElementById('btn-gen-pred');
+    if (btn) {
+        btn.innerText = 'Calculando proyección...';
+        btn.disabled = true;
+    }
+
+    try {
+        const p = new URLSearchParams({ anio_objetivo: anio });
+        if (edocve) p.append('edocve', edocve);
+        if (riesgo) p.append('riesgo', riesgo);
+
+        const data = await fetch('/api/proyeccion?' + p.toString()).then(r => r.json());
+
+        ['pred-anio-label','pred-anio-label2','pred-tabla-titulo'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = anio;
+        });
+
+        if (currentMode === 'prediccion') {
+            const prevTotal = parseInt(document.getElementById('kpi-total').innerText.replace(/,/g, '')) || 70751;
+            const prevProm = parseFloat(document.getElementById('kpi-promedio').innerText) || 46.77;
+            const prevAlto = parseInt(document.getElementById('kpi-alto').innerText.replace(/,/g, '')) || 23584;
+            const prevMedio = parseInt(document.getElementById('kpi-medio').innerText.replace(/,/g, '')) || 23583;
+            const prevBajo = parseInt(document.getElementById('kpi-bajo').innerText.replace(/,/g, '')) || 23584;
+
+            animateValue('kpi-total', prevTotal, data.total_secciones, 450);
+            animateValue('kpi-alto', prevAlto, data.secciones_alto_riesgo_proyectado, 450);
+            animateValue('kpi-medio', prevMedio, data.secciones_medio_riesgo_proyectado, 450);
+            animateValue('kpi-bajo', prevBajo, data.secciones_bajo_riesgo_proyectado, 450);
+            animateValue('kpi-promedio', prevProm, data.promedio_abstencion_proyectada, 500, true);
+
+            document.getElementById('kpi-lbl-prom').innerText = 'Abstención Proyectada';
+            document.getElementById('kpi-sub-prom').innerText = 'Proyección ' + anio;
+            document.getElementById('kpi-header-title').innerHTML = 'Métricas Proyectadas del Proceso <span id="kpi-anio-label">' + anio + '</span>';
+            
+            const subAlto = document.getElementById('kpi-sub-alto');
+            if (subAlto) {
+                const pctA = ((data.secciones_alto_riesgo_proyectado / data.total_secciones) * 100).toFixed(1);
+                subAlto.innerText = `>50.99% - ${pctA}%`;
+            }
+            const subMedio = document.getElementById('kpi-sub-medio');
+            if (subMedio) {
+                const pctM = ((data.secciones_medio_riesgo_proyectado / data.total_secciones) * 100).toFixed(1);
+                subMedio.innerText = `42-51% - ${pctM}%`;
+            }
+            const subBajo = document.getElementById('kpi-sub-bajo');
+            if (subBajo) {
+                const pctB = ((data.secciones_bajo_riesgo_proyectado / data.total_secciones) * 100).toFixed(1);
+                subBajo.innerText = `<42.31% - ${pctB}%`;
+            }
+        }
+
+        document.getElementById('pred-base-2024').innerText = data.promedio_abstencion_base_2024.toFixed(2) + '%';
+        document.getElementById('pred-prom-proy').innerText = data.promedio_abstencion_proyectada.toFixed(2) + '%';
+        const deltaSign = data.delta_promedio >= 0 ? '+' : '';
+        document.getElementById('pred-delta').innerText = deltaSign + data.delta_promedio.toFixed(2) + '%';
+        document.getElementById('pred-meta-nota').innerText = data.tipo_eleccion + ' · Factor de ajuste: ' + data.factor_ajuste_aplicado;
+        document.getElementById('pred-nota-metodologica').innerText = data.nota_metodologica;
+
+        cachedProyeccionData = data;
+
+        // Actualizar datos de los escenarios si vienen en la respuesta
+        if (data.escenarios) {
+            const sc = data.escenarios;
+            document.getElementById('scen-base-prom').innerText = sc.promedio_base.toFixed(2) + '%';
+            document.getElementById('scen-base-alto').innerText = sc.secciones_alto_riesgo_base.toLocaleString() + ' sec.';
+            document.getElementById('scen-interv-prom').innerText = sc.promedio_intervencion.toFixed(2) + '%';
+            document.getElementById('scen-interv-alto').innerText = sc.secciones_alto_riesgo_intervencion.toLocaleString() + ' sec.';
+            document.getElementById('scen-diff-prom').innerText = (sc.diferencia_global_pct >= 0 ? '+' : '') + sc.diferencia_global_pct.toFixed(2) + '%';
+            document.getElementById('scen-mitigadas').innerText = sc.secciones_mitigadas.toLocaleString() + ' sec. (-' + sc.reduccion_alto_riesgo_pct + '%)';
+        }
+
+        const tbody = document.getElementById('pred-tbody');
+        tbody.innerHTML = data.muestra_secciones.map(r => {
+            const base = (r.PREDICCION_BASE_2024 * 100).toFixed(2);
+            const proy = r.PREDICCION_PROYECTADA_PCT;
+            const interv = r.ABSTENCION_INTERVENCION_PCT !== undefined ? r.ABSTENCION_INTERVENCION_PCT : (proy - 2.5).toFixed(2);
+            const diff = r.DIFERENCIA_ESCENARIOS_PCT !== undefined ? r.DIFERENCIA_ESCENARIOS_PCT : -2.50;
+            const diffSign = diff >= 0 ? '+' : '';
+            const diffColor = diff <= 0 ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold';
+            const rBase = r.RIESGO_PROYECTADO || r.RIESGO;
+            const rInterv = r.RIESGO_INTERVENCION || rBase;
+            const rowJson = JSON.stringify(r).replace(/"/g, '&quot;');
+
+            // Resaltado de celda según escenario seleccionado
+            const colBaseClass = (activeScenario === 'base') ? 'bg-slate-100 font-bold text-slate-900 border-x border-slate-200' : 'text-slate-700 font-medium';
+            const colIntervClass = (activeScenario === 'intervencion') ? 'bg-emerald-100/70 font-black text-emerald-950 border-x border-emerald-300' : 'font-bold text-emerald-800';
+            const colDiffClass = (activeScenario === 'impacto') ? 'bg-rose-100/70 font-black border-x border-rose-300 ' + diffColor : diffColor;
+
+            return `
+            <tr class="hover:bg-slate-50 border-b border-slate-100 transition">
+                <td class="py-2 px-4 font-mono text-slate-700">${r.ID_TERRITORIO}</td>
+                <td class="py-2 px-4 font-semibold text-slate-900">${r.EDONOM}</td>
+                <td class="py-2 px-3 text-center font-bold">${r.SECCION}</td>
+                <td class="py-2 px-4 ${colBaseClass}">${proy}%</td>
+                <td class="py-2 px-4 ${colIntervClass}">${interv}%</td>
+                <td class="py-2 px-4 text-center ${colDiffClass}">${diffSign}${diff}%</td>
+                <td class="py-2 px-4 text-center"><span class="px-2 py-0.5 text-[10px] font-bold rounded risk-${rBase}">${rBase}</span></td>
+                <td class="py-2 px-4 text-center"><span class="px-2 py-0.5 text-[10px] font-bold rounded risk-${rInterv}">${rInterv}</span></td>
+                <td class="py-2 px-3 text-center">
+                    <button onclick="openModal(${rowJson})" class="text-xs text-ine-wine font-bold hover:underline">Ficha</button>
+                </td>
+            </tr>`;
+        }).join('');
+
+    } catch(e) {
+        console.error(e);
+    } finally {
+        if (btn) {
+            btn.innerHTML = 'Generar Proyección Electoral';
+            btn.disabled = false;
+        }
+    }
+}
+
+// MODAL
+async function openModal(sec) {
+    document.getElementById('modal-title').innerText = `Sección #${sec.SECCION} - ${sec.EDONOM}`;
+    document.getElementById('modal-estado').innerText = sec.EDOCVE + ' - ' + sec.EDONOM;
+    document.getElementById('modal-municipio').innerText = sec.MPIOCVE + ' - ' + sec.MPIONOM;
+    document.getElementById('modal-id').innerText = sec.ID_TERRITORIO;
+    const tipo = sec.TIPOSEC==='U' ? 'Urbana (U)' : sec.TIPOSEC==='R' ? 'Rural (R)' : 'Mixta (M)';
+    document.getElementById('modal-tipo').innerText = tipo;
+
+    const pct = sec.PREDICCION_PCT || (sec.PREDICCION_ABSTENCION * 100);
+    document.getElementById('modal-pct').innerText = pct.toFixed(2) + '% Abstención Predicha';
+    document.getElementById('modal-risk').innerText = sec.RIESGO;
+
+    const banner = document.getElementById('modal-risk-banner');
+    if (sec.RIESGO==='ALTO') banner.className = 'p-3 rounded-lg text-center border bg-red-50 border-red-200 text-red-900';
+    else if (sec.RIESGO==='MEDIO') banner.className = 'p-3 rounded-lg text-center border bg-amber-50 border-amber-200 text-amber-900';
+    else banner.className = 'p-3 rounded-lg text-center border bg-emerald-50 border-emerald-200 text-emerald-900';
+
+    const diff = pct - 46.77;
+    document.getElementById('modal-diff').innerText = (diff >= 0 ? '+' : '') + diff.toFixed(2) + '% vs media nacional';
+    document.getElementById('modal-bar').style.width = Math.min(100, Math.max(0, pct)) + '%';
+
+    // Obtener información demográfica y sugerencias desde la API
+    const demoContent = document.getElementById('modal-demo-content');
+    const demoEmpty = document.getElementById('modal-demo-empty');
+    const recsContainer = document.getElementById('modal-recs-container');
+    recsContainer.innerHTML = '<div class="text-slate-400 italic">Cargando recomendaciones...</div>';
+
+    document.getElementById('modal-detalle').classList.remove('hidden');
+
+    try {
+        const queryId = sec.ID_TERRITORIO || sec.ID_REGISTRO || sec.SECCION;
+        const res = await fetch(`/api/seccion/${queryId}`).then(r => r.json());
+        const demo = res.DEMOGRAFIA;
+
+        if (demo && demo.EDAD_PROMEDIO) {
+            demoContent.classList.remove('hidden');
+            demoEmpty.classList.add('hidden');
+
+            document.getElementById('modal-edad-prom').innerText = demo.EDAD_PROMEDIO.toFixed(1) + ' años';
+            document.getElementById('modal-grupo-pred').innerText = demo.GRUPO_PREDOMINANTE || '-';
+            
+            const macroLabel = demo.PERFIL_MACRO === 'JOVENES' ? 'Mayoría Jóvenes' : demo.PERFIL_MACRO === 'MAYORES' ? 'Mayoría Adultos Mayores' : 'Mayoría Adultos';
+            document.getElementById('modal-perfil-macro').innerText = macroLabel;
+
+            // Porcentajes
+            const p18 = Number(demo.PCT_18_24 || 0).toFixed(1);
+            const p25 = Number(demo.PCT_25_34 || 0).toFixed(1);
+            const p35 = Number(demo.PCT_35_44 || 0).toFixed(1);
+            const p45 = Number(demo.PCT_45_59 || 0).toFixed(1);
+            const p60 = Number(demo.PCT_60_MAS || 0).toFixed(1);
+
+            document.getElementById('modal-p18').innerText = p18 + '%';
+            document.getElementById('modal-p25').innerText = p25 + '%';
+            document.getElementById('modal-p35').innerText = p35 + '%';
+            document.getElementById('modal-p45').innerText = p45 + '%';
+            document.getElementById('modal-p60').innerText = p60 + '%';
+
+            document.getElementById('modal-pct-jovenes').innerText = Number(demo.PCT_JOVENES || (Number(p18) + Number(p25))).toFixed(1);
+            document.getElementById('modal-pct-adultos').innerText = Number(demo.PCT_ADULTOS || (Number(p35) + Number(p45))).toFixed(1);
+            document.getElementById('modal-pct-mayores').innerText = Number(demo.PCT_MAYORES || Number(p60)).toFixed(1);
+
+            // Anchos de barra
+            document.getElementById('bar-p18').style.width = p18 + '%';
+            document.getElementById('bar-p25').style.width = p25 + '%';
+            document.getElementById('bar-p35').style.width = p35 + '%';
+            document.getElementById('bar-p45').style.width = p45 + '%';
+            document.getElementById('bar-p60').style.width = p60 + '%';
+
+            // Recomendaciones
+            const recs = demo.RECOMENDACIONES || [];
+            if (recs.length > 0) {
+                recsContainer.innerHTML = recs.map((r, idx) => `
+                    <div class="flex items-start gap-2 bg-white/80 p-2 rounded border border-amber-100">
+                        <span class="font-bold text-amber-800 text-[11px] shrink-0 font-mono">${idx+1}.</span>
+                        <span class="leading-relaxed">${r}</span>
+                    </div>
+                `).join('');
+            } else {
+                recsContainer.innerHTML = '<div class="text-slate-500 italic">Sin recomendaciones particulares registradas.</div>';
+            }
+        } else {
+            demoContent.classList.add('hidden');
+            demoEmpty.classList.remove('hidden');
+            recsContainer.innerHTML = `
+                <div class="flex items-start gap-2 bg-white/80 p-2 rounded border border-amber-100">
+                    <span class="font-bold text-amber-800 text-[11px] shrink-0 font-mono">1.</span>
+                    <span class="leading-relaxed">Reforzar orientación territorial básica y verificar localización de casillas para los electores de la sección.</span>
+                </div>
+            `;
+        }
+    } catch(err) {
+        console.error('Error al cargar datos demográficos de la sección:', err);
+        demoContent.classList.add('hidden');
+        demoEmpty.classList.remove('hidden');
+        recsContainer.innerHTML = '<div class="text-slate-500 italic">No fue posible obtener recomendaciones detalladas.</div>';
+    }
+}
+
+function closeModal() { document.getElementById('modal-detalle').classList.add('hidden'); }
+function closeCuboModal() { document.getElementById('modal-cubo-riesgo').classList.add('hidden'); }
+window.addEventListener('keydown', e => { 
+    if(e.key==='Escape') {
+        closeModal();
+        closeCuboModal();
+    }
+});
+
+// INTERACCIÓN CON CUBOS DE RIESGO / RESUMEN
+function selectRiskCube(tipo) {
+    activeRiskFilter = (tipo === 'TODOS' || tipo === 'PROMEDIO') ? '' : tipo;
+
+    const modal = document.getElementById('modal-cubo-riesgo');
+    const titulo = document.getElementById('modal-cubo-titulo');
+    const subtitulo = document.getElementById('modal-cubo-subtitulo');
+    const badgeRiesgo = document.getElementById('modal-cubo-badge-riesgo');
+    const abstencion = document.getElementById('modal-cubo-abstencion');
+    const explicacion = document.getElementById('modal-cubo-explicacion');
+    const consejosContainer = document.getElementById('modal-cubo-consejos');
+    const icon = document.getElementById('modal-cubo-icon');
+    const banner = document.getElementById('modal-cubo-banner');
+
+    const anioActivo = (currentMode === 'historico') ? currentAnioHist : currentAnioPred;
+
+    if (tipo === 'ALTO') {
+        titulo.innerText = `Segmento de Alto Riesgo de Abstención (${anioActivo})`;
+        subtitulo.innerText = 'Prioridad Institucional 1';
+        badgeRiesgo.innerText = 'ALTO RIESGO';
+        badgeRiesgo.className = 'text-xl font-black mt-0.5 text-red-800';
+        banner.className = 'p-3.5 rounded-xl border bg-red-50 border-red-200 flex items-center justify-between';
+        abstencion.innerText = '> 50.99%';
+        icon.innerText = '[!]';
+        explicacion.innerText = 'Territorios con probabilidad crítica de abstención electoral. Concentran factores de desafección, lejanía geográfica de casillas o antecedentes de baja afluencia ciudadana.';
+        consejosContainer.innerHTML = `
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-red-800 font-mono text-[11px] shrink-0">1.</span>
+                <span><strong>Despliegue de brigadas de orientación territorial:</strong> Priorizar presencia presencial de personal del INE con recorridos casa por casa en las secciones críticas.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-red-800 font-mono text-[11px] shrink-0">2.</span>
+                <span><strong>Verificación de accesibilidad y casillas extraordinarias:</strong> Confirmar vías de acceso y evaluar transporte de apoyo o ubicación de casillas más cercanas.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-red-800 font-mono text-[11px] shrink-0">3.</span>
+                <span><strong>Campaña intensiva de recordatorios:</strong> Intensificar mensajes en espacios comunitarios, radios locales y perifoneo sobre la importancia del voto.</span>
+            </div>
+        `;
+    } else if (tipo === 'MEDIO') {
+        titulo.innerText = `Segmento de Riesgo Medio de Abstención (${anioActivo})`;
+        subtitulo.innerText = 'Monitoreo y Refuerzo Preventivo';
+        badgeRiesgo.innerText = 'RIESGO MEDIO';
+        badgeRiesgo.className = 'text-xl font-black mt-0.5 text-amber-800';
+        banner.className = 'p-3.5 rounded-xl border bg-amber-50 border-amber-200 flex items-center justify-between';
+        abstencion.innerText = '42.31% - 50.99%';
+        icon.innerText = '[~]';
+        explicacion.innerText = 'Zonas con niveles intermedios de participación. Representan el tercil pivote donde acciones focalizadas tienen el mayor retorno en mitigación del abstencionismo.';
+        consejosContainer.innerHTML = `
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-amber-800 font-mono text-[11px] shrink-0">1.</span>
+                <span><strong>Información clara sobre ubicación y horarios:</strong> Colocar módulos y mantas informativas en mercados y plazas públicas con croquis de casillas.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-amber-800 font-mono text-[11px] shrink-0">2.</span>
+                <span><strong>Activación de líderes comunitarios:</strong> Fomentar la participación vecinal mediante talleres informativos y difusión directa con asociaciones locales.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-amber-800 font-mono text-[11px] shrink-0">3.</span>
+                <span><strong>Difusión digital geolocalizada:</strong> Canalizar recordatorios preventivos en redes sociales y mensajería móvil enfocados en electores de la zona.</span>
+            </div>
+        `;
+    } else if (tipo === 'BAJO') {
+        titulo.innerText = `Segmento de Bajo Riesgo de Abstención (${anioActivo})`;
+        subtitulo.innerText = 'Consolidación de Participación';
+        badgeRiesgo.innerText = 'BAJO RIESGO';
+        badgeRiesgo.className = 'text-xl font-black mt-0.5 text-emerald-800';
+        banner.className = 'p-3.5 rounded-xl border bg-emerald-50 border-emerald-200 flex items-center justify-between';
+        abstencion.innerText = '< 42.31%';
+        icon.innerText = '[v]';
+        explicacion.innerText = 'Secciones electorales con arraigo cívico sólido y alta tasa de afluencia a las urnas. La estrategia consiste en mantener la eficiencia operativa del día de la jornada.';
+        consejosContainer.innerHTML = `
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-emerald-800 font-mono text-[11px] shrink-0">1.</span>
+                <span><strong>Optimización del flujo en casillas:</strong> Prever doble mesa de votación en casillas con alta concurrencia para evitar filas prolongadas.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-emerald-800 font-mono text-[11px] shrink-0">2.</span>
+                <span><strong>Atención a nuevos votantes:</strong> Incentivar a jóvenes que cumplen 18 años para consolidar el hábito de participación democrática.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-emerald-800 font-mono text-[11px] shrink-0">3.</span>
+                <span><strong>Reconocimiento cívico:</strong> Difundir historias locales de alta participación comunitaria como modelo de compromiso cívico.</span>
+            </div>
+        `;
+    } else {
+        titulo.innerText = `Padrón Nacional y Promedio (${anioActivo})`;
+        subtitulo.innerText = 'Visión Global';
+        badgeRiesgo.innerText = 'UNIVERSO TOTAL';
+        badgeRiesgo.className = 'text-xl font-black mt-0.5 text-slate-800';
+        banner.className = 'p-3.5 rounded-xl border bg-slate-50 border-slate-200 flex items-center justify-between';
+        abstencion.innerText = '46.77% Promedio';
+        icon.innerText = '[#]';
+        explicacion.innerText = 'Visualización integral de las 70,751 secciones electorales del país. Permite dimensionar la distribución territorial homogénea de los tres terciles de riesgo.';
+        consejosContainer.innerHTML = `
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-slate-700 font-mono text-[11px] shrink-0">1.</span>
+                <span><strong>Equilibrio presupuestal:</strong> Focalizar el 60% de recursos extraordinarios en el tercil de alto riesgo y el 40% restante en mantenimiento general.</span>
+            </div>
+            <div class="flex items-start gap-2 bg-white/90 p-2 rounded border border-amber-100">
+                <span class="font-bold text-slate-700 font-mono text-[11px] shrink-0">2.</span>
+                <span><strong>Monitoreo continuo de indicadores:</strong> Ajustar los calendarios de visita conforme se acerque el ciclo electoral.</span>
+            </div>
+        `;
+    }
+
+    // 1. Sincronizar selectores de la interfaz según el modo activo
+    if (currentMode === 'historico') {
+        const selRiesgo = document.getElementById('select-riesgo');
+        if (selRiesgo) {
+            selRiesgo.value = (tipo === 'ALTO' || tipo === 'MEDIO' || tipo === 'BAJO') ? tipo : '';
+        }
+        currentPage = 1;
+        queryTable();
+    } else {
+        const selPredRiesgo = document.getElementById('sel-pred-riesgo');
+        if (selPredRiesgo) {
+            selPredRiesgo.value = (tipo === 'ALTO' || tipo === 'MEDIO' || tipo === 'BAJO') ? tipo : '';
+        }
+        generateProjection();
+    }
+
+    // 2. Actualizar el mapa automáticamente (resalta los estados correspondientes al nivel de riesgo seleccionado)
+    updateMapHighlight();
+
+    // 3. Abrir la ventana emergente
+    modal.classList.remove('hidden');
+}
+
+// SUMMARY TABLES
+function switchResumen(tab) {
+    const edoBtn = document.getElementById('btn-tab-edo');
+    const mpioBtn = document.getElementById('btn-tab-mpio');
+    const edoPanel = document.getElementById('tab-estados');
+    const mpioPanel= document.getElementById('tab-municipios');
+
+    if (tab === 'estados') {
+        edoPanel.classList.remove('hidden'); mpioPanel.classList.add('hidden');
+        edoBtn.className = 'px-4 py-2 text-xs font-bold border-b-2 border-ine-wine text-ine-wine';
+        mpioBtn.className = 'px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800';
+    } else {
+        mpioPanel.classList.remove('hidden'); edoPanel.classList.add('hidden');
+        mpioBtn.className = 'px-4 py-2 text-xs font-bold border-b-2 border-ine-wine text-ine-wine';
+        edoBtn.className = 'px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-800';
+        loadMunicipiosSummary();
+    }
+}
+
+async function loadEstadosSummary() {
+    try {
+        const estados = await fetch('/api/resumen/estados').then(r => r.json());
+        const tbody = document.getElementById('tbody-estados');
+        tbody.innerHTML = estados.map(e => {
+            const pct = (e.PROMEDIO_ABSTENCION_PRED * 100).toFixed(2);
+            const pctAlto = e.PORC_SECCIONES_ALTO_RIESGO.toFixed(1);
+            return `
+            <tr class="hover:bg-slate-50 border-b border-slate-100">
+                <td class="py-2.5 px-3 font-mono text-slate-500">${e.EDOCVE}</td>
+                <td class="py-2.5 px-4 font-bold text-slate-900">${e.EDONOM}</td>
+                <td class="py-2.5 px-4 text-right font-bold text-ine-wine">${pct}%</td>
+                <td class="py-2.5 px-4 text-right text-slate-700">${e.TOTAL_SECCIONES.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-red-800">${e.SECCIONES_RIESGO_ALTO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-amber-800">${e.SECCIONES_RIESGO_MEDIO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-emerald-800">${e.SECCIONES_RIESGO_BAJO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-bold ${+pctAlto>50?'text-red-800':'text-slate-900'}">${pctAlto}%</td>
+                <td class="py-2.5 px-3 text-center">
+                    <button onclick="filterByMap(${e.EDOCVE},'${e.EDONOM}','${pct}',${e.TOTAL_SECCIONES})"
+                        class="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded font-semibold transition">
+                        Ver secciones
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadMunicipiosSummary() {
+    const edocve = document.getElementById('sel-resumen-estado').value;
+    const url = edocve ? `/api/resumen/municipios?edocve=${edocve}` : `/api/resumen/municipios?limit=150`;
+    try {
+        const mpios = await fetch(url).then(r => r.json());
+        const tbody = document.getElementById('tbody-municipios');
+        tbody.innerHTML = mpios.map(m => {
+            const pct = (m.PROMEDIO_ABSTENCION_PRED * 100).toFixed(2);
+            const pctAlto = m.PORC_SECCIONES_ALTO_RIESGO.toFixed(1);
+            return `
+            <tr class="hover:bg-slate-50 border-b border-slate-100">
+                <td class="py-2.5 px-3 text-slate-700">${m.EDONOM}</td>
+                <td class="py-2.5 px-4 font-bold text-slate-900">${m.MPIONOM}</td>
+                <td class="py-2.5 px-4 text-right font-bold text-ine-wine">${pct}%</td>
+                <td class="py-2.5 px-4 text-right text-slate-700">${m.TOTAL_SECCIONES.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-red-800">${m.SECCIONES_RIESGO_ALTO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-amber-800">${m.SECCIONES_RIESGO_MEDIO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-semibold text-emerald-800">${m.SECCIONES_RIESGO_BAJO.toLocaleString()}</td>
+                <td class="py-2.5 px-4 text-right font-bold ${+pctAlto>50?'text-red-800':'text-slate-900'}">${pctAlto}%</td>
+                <td class="py-2.5 px-3 text-center">
+                    <button onclick="filterByStateAndMpio(${m.EDOCVE},${m.MPIOCVE})"
+                        class="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded font-semibold transition">
+                        Ver
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function filterByStateAndMpio(edocve, mpiocve) {
+    document.getElementById('select-estado').value = edocve;
+    await onEstadoChange();
+    document.getElementById('select-municipio').value = mpiocve;
+    onMunicipioChange();
+    setMode('historico');
+    document.getElementById('secciones-tbody').closest('section')?.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+</script>
+</body>
+</html>

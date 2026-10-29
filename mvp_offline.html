@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INE | Visor Autónomo de Abstención Electoral</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .risk-badge-ALTO { background-color: #FDF2F2; color: #991B1B; border: 1px solid #FCA5A5; }
+        .risk-badge-MEDIO { background-color: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+        .risk-badge-BAJO { background-color: #F0FDF4; color: #166534; border: 1px solid #BBF7D0; }
+        #map { min-height: 420px; border-radius: 0.5rem; }
+    </style>
+</head>
+<body class="bg-[#F8F9FA] text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+
+    <div class="h-1 bg-gradient-to-r from-[#6A1B31] via-[#8C2243] to-[#6A1B31] w-full"></div>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
+        <div class="max-w-7xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-3.5">
+                <div class="w-10 h-10 rounded-lg bg-[#6A1B31] flex items-center justify-center text-white font-black text-lg tracking-wider shadow-xs">
+                    INE
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-[#6A1B31] bg-[#FAF2F5] border border-[#E8D5DC] px-2 py-0.5 rounded">
+                            Instituto Nacional Electoral
+                        </span>
+                        <span class="text-[11px] text-slate-500 font-medium">Modo Autónomo Local</span>
+                    </div>
+                    <h1 class="text-base font-bold text-slate-900 tracking-tight">
+                        Sistema de Predicción y Focalización de Abstención Electoral
+                    </h1>
+                </div>
+            </div>
+
+            <!-- Proceso Electoral Selector -->
+            <div class="flex items-center gap-3">
+                <div class="bg-slate-50 border border-slate-300 rounded-lg p-1.5 flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-600 px-1">🗓️ Proceso:</span>
+                    <select id="sel-anio" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-bold text-slate-900">
+                        <option value="2024" selected>2024 (Proceso Activo)</option>
+                        <option value="2021">2021 (Histórico)</option>
+                        <option value="2018">2018 (Histórico)</option>
+                        <option value="2015">2015 (Histórico)</option>
+                        <option value="2012">2012 (Histórico)</option>
+                        <option value="2009">2009 (Histórico)</option>
+                    </select>
+                </div>
+
+                <label class="bg-[#6A1B31] hover:bg-[#4D1222] text-white text-xs font-semibold px-3.5 py-2 rounded-lg cursor-pointer shadow-xs transition">
+                    📂 Cargar 'salidas_finales_abstencion.csv'
+                    <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleCSVLoad(event)">
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8 flex-1 w-full">
+
+        <!-- Status Box -->
+        <div id="dataset-status-box" class="bg-slate-100 border border-slate-300 p-4 rounded-xl flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="text-xl">📊</span>
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider" id="status-title">Dataset Seccional Pendiente de Cargar</h2>
+                    <p class="text-xs text-slate-600" id="status-desc">
+                        Para explorar las 70,751 secciones individuales sin servidor, seleccione el archivo <code class="bg-white px-1.5 py-0.5 rounded border border-slate-300 font-mono">salidas_finales_abstencion.csv</code> en el botón superior.
+                    </p>
+                </div>
+            </div>
+            <span id="badge-total-loaded" class="bg-slate-200 text-slate-800 text-xs px-3 py-1 rounded-full font-mono font-bold">0 secciones</span>
+        </div>
+
+        <!-- 2. KPIs -->
+        <section class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Secciones</div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">70,751</div>
+                <div class="text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-100">Universo Nacional</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Abstención Media</div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-[#6A1B31] mt-1">46.77%</div>
+                <div class="text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-100">Proyección Nacional</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-red-200 shadow-xs">
+                <div class="text-[11px] font-bold text-red-800 uppercase tracking-wider flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-red-700"></span> Alto Riesgo
+                </div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-red-800 mt-1">23,584</div>
+                <div class="text-[11px] text-red-600 mt-2 pt-2 border-t border-red-100">&gt; 50.99% abst. (33.3%)</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-amber-200 shadow-xs">
+                <div class="text-[11px] font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-amber-600"></span> Riesgo Medio
+                </div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-amber-800 mt-1">23,583</div>
+                <div class="text-[11px] text-amber-600 mt-2 pt-2 border-t border-amber-100">42.31% - 50.99% (33.3%)</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs">
+                <div class="text-[11px] font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-700"></span> Bajo Riesgo
+                </div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-emerald-800 mt-1">23,584</div>
+                <div class="text-[11px] text-emerald-600 mt-2 pt-2 border-t border-emerald-100">&lt; 42.31% abst. (33.3%)</div>
+            </div>
+        </section>
+
+        <!-- 3. Filters -->
+        <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h2 class="text-sm font-bold text-slate-900">Filtros de Búsqueda Territorial</h2>
+                <button onclick="resetFilters()" class="text-xs text-[#6A1B31] font-semibold hover:underline">Restablecer</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Entidad Federativa</label>
+                    <select id="sel-edo" onchange="applyFilters()" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs">
+                        <option value="">-- Toda la República --</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Nivel de Riesgo</label>
+                    <select id="sel-riesgo" onchange="applyFilters()" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs">
+                        <option value="">-- Todos los Niveles --</option>
+                        <option value="ALTO">Alto Riesgo (&gt; 50.99%)</option>
+                        <option value="MEDIO">Riesgo Medio (42.31% - 50.99%)</option>
+                        <option value="BAJO">Bajo Riesgo (&lt; 42.31%)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Buscar Sección o ID</label>
+                    <input type="text" id="inp-search" oninput="applyFilters()" placeholder="Ej. 150, 10010001..." class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs">
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. Table -->
+        <section class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+                <span id="results-count" class="font-bold text-slate-800">0 secciones mostradas</span>
+                <span class="text-slate-500">Muestra paginada de hasta 100 registros</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                            <th class="py-2.5 px-4">ID Territorio</th>
+                            <th class="py-2.5 px-4">Entidad</th>
+                            <th class="py-2.5 px-4">Municipio</th>
+                            <th class="py-2.5 px-3 text-center">Sección</th>
+                            <th class="py-2.5 px-3 text-center">Tipo</th>
+                            <th class="py-2.5 px-4">Abstención Proyectada</th>
+                            <th class="py-2.5 px-4 text-center">Riesgo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-secciones" class="divide-y divide-slate-100">
+                        <tr>
+                            <td colspan="7" class="text-center py-12 text-slate-400">
+                                Cargue el archivo <code>salidas_finales_abstencion.csv</code> en el botón superior para explorar la base seccional.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        let allSections = [];
+        let filteredSections = [];
+
+        function handleCSVLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('status-title').innerText = "Procesando archivo CSV...";
+            document.getElementById('status-desc').innerText = `Analizando ${file.name}...`;
+
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    allSections = results.data;
+                    document.getElementById('status-title').innerText = "✅ Dataset Cargado con Éxito";
+                    document.getElementById('status-desc').innerText = `Se han cargado ${allSections.length.toLocaleString()} secciones electorales en memoria local.`;
+                    document.getElementById('badge-total-loaded').innerText = `${allSections.length.toLocaleString()} secciones`;
+                    document.getElementById('dataset-status-box').className = "bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center justify-between";
+
+                    populateStateOptions();
+                    applyFilters();
+                }
+            });
+        }
+
+        function populateStateOptions() {
+            const estados = [...new Set(allSections.map(s => s.EDONOM))].filter(Boolean).sort();
+            const sel = document.getElementById('sel-edo');
+            sel.innerHTML = '<option value="">-- Toda la República --</option>';
+            estados.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e;
+                opt.innerText = e;
+                sel.appendChild(opt);
+            });
+        }
+
+        function applyFilters() {
+            if (allSections.length === 0) return;
+
+            const edo = document.getElementById('sel-edo').value;
+            const riesgo = document.getElementById('sel-riesgo').value;
+            const search = document.getElementById('inp-search').value.trim().toLowerCase();
+
+            filteredSections = allSections.filter(s => {
+                if (edo && s.EDONOM !== edo) return false;
+                if (riesgo && s.RIESGO !== riesgo) return false;
+                if (search) {
+                    const secStr = String(s.SECCION || '');
+                    const idStr = String(s.ID_TERRITORIO || '');
+                    const mpioStr = String(s.MPIONOM || '').toLowerCase();
+                    if (!secStr.includes(search) && !idStr.includes(search) && !mpioStr.includes(search)) return false;
+                }
+                return true;
+            });
+
+            renderTable(filteredSections.slice(0, 100));
+            document.getElementById('results-count').innerText = `${filteredSections.length.toLocaleString()} secciones coincidentes (mostrando 100)`;
+        }
+
+        function renderTable(rows) {
+            const tbody = document.getElementById('tbody-secciones');
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-slate-400">No se encontraron registros.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            rows.forEach(r => {
+                const pct = (r.PREDICCION_ABSTENCION * 100).toFixed(2);
+                const rClass = `risk-badge-${r.RIESGO}`;
+                const barColor = r.RIESGO === 'ALTO' ? 'bg-red-700' : r.RIESGO === 'MEDIO' ? 'bg-amber-600' : 'bg-emerald-700';
+
+                html += `
+                <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+                    <td class="py-2.5 px-4 font-mono font-medium text-slate-800">${r.ID_TERRITORIO}</td>
+                    <td class="py-2.5 px-4 font-bold text-slate-900">${r.EDONOM}</td>
+                    <td class="py-2.5 px-4 text-slate-600">${r.MPIONOM}</td>
+                    <td class="py-2.5 px-3 text-center font-bold text-slate-900">${r.SECCION}</td>
+                    <td class="py-2.5 px-3 text-center text-slate-500 font-medium">${r.TIPOSEC || 'U'}</td>
+                    <td class="py-2.5 px-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-16 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                <div class="${barColor} h-full" style="width: ${pct}%"></div>
+                            </div>
+                            <span class="font-bold text-slate-900">${pct}%</span>
+                        </div>
+                    </td>
+                    <td class="py-2.5 px-4 text-center">
+                        <span class="px-2 py-0.5 text-[11px] font-bold rounded-md ${rClass}">${r.RIESGO}</span>
+                    </td>
+                </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function resetFilters() {
+            document.getElementById('sel-edo').value = '';
+            document.getElementById('sel-riesgo').value = '';
+            document.getElementById('inp-search').value = '';
+            applyFilters();
+        }
+    </script>
+</body>
+</html>
